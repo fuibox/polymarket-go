@@ -7,13 +7,13 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/shopspring/decimal"
-	"github.com/ybina/polymarket-go/client/clob/clob_types"
-	"github.com/ybina/polymarket-go/client/clob/utils"
-	"github.com/ybina/polymarket-go/client/clob/utils_order_builder"
-	"github.com/ybina/polymarket-go/client/config"
-	"github.com/ybina/polymarket-go/client/constants"
-	"github.com/ybina/polymarket-go/client/signer"
-	"github.com/ybina/polymarket-go/client/types"
+	"github.com/fuibox/polymarket-go/client/clob/clob_types"
+	"github.com/fuibox/polymarket-go/client/clob/utils"
+	"github.com/fuibox/polymarket-go/client/clob/utils_order_builder"
+	"github.com/fuibox/polymarket-go/client/config"
+	"github.com/fuibox/polymarket-go/client/constants"
+	"github.com/fuibox/polymarket-go/client/signer"
+	"github.com/fuibox/polymarket-go/client/types"
 )
 
 func NewOrderBuilder(signer *signer.Signer, sigType constants.SigType, funder common.Address) (*OrderBuilder, error) {

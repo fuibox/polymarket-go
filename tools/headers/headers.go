@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ybina/polymarket-go/client/clob/clob_types"
-	"github.com/ybina/polymarket-go/client/signer"
-	"github.com/ybina/polymarket-go/client/types"
-	"github.com/ybina/polymarket-go/tools/eip712"
-	"github.com/ybina/polymarket-go/tools/hmac"
+	"github.com/fuibox/polymarket-go/client/clob/clob_types"
+	"github.com/fuibox/polymarket-go/client/signer"
+	"github.com/fuibox/polymarket-go/client/types"
+	"github.com/fuibox/polymarket-go/tools/eip712"
+	"github.com/fuibox/polymarket-go/tools/hmac"
 )
 
 func CreateL1Headers(signerHandler *signer.Signer, option clob_types.ClobOption, chainID types.Chain, nonce *uint64, timestamp *int64) (*types.L1PolyHeader, error) {

@@ -13,7 +13,7 @@ import (
 	"github.com/tkhq/go-sdk/pkg/api/client/wallets"
 	"github.com/tkhq/go-sdk/pkg/api/models"
 	"github.com/tkhq/go-sdk/pkg/apikey"
-	"github.com/ybina/polymarket-go/tools/utils"
+	"github.com/fuibox/polymarket-go/tools/utils"
 )
 
 type Config struct {

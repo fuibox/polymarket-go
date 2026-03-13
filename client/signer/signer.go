@@ -10,9 +10,9 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ybina/polymarket-go/client/constants"
-	"github.com/ybina/polymarket-go/tools/utils"
-	"github.com/ybina/polymarket-go/turnkey"
+	"github.com/fuibox/polymarket-go/client/constants"
+	"github.com/fuibox/polymarket-go/tools/utils"
+	"github.com/fuibox/polymarket-go/turnkey"
 )
 
 type SignerType int

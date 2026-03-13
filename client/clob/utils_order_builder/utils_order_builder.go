@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ybina/polymarket-go/client/clob/utils"
-	"github.com/ybina/polymarket-go/client/constants"
-	"github.com/ybina/polymarket-go/client/relayer/model/polyEip712"
-	"github.com/ybina/polymarket-go/client/signer"
-	"github.com/ybina/polymarket-go/client/types"
+	"github.com/fuibox/polymarket-go/client/clob/utils"
+	"github.com/fuibox/polymarket-go/client/constants"
+	"github.com/fuibox/polymarket-go/client/relayer/model/polyEip712"
+	"github.com/fuibox/polymarket-go/client/signer"
+	"github.com/fuibox/polymarket-go/client/types"
 )
 
 func NewUtilsOrderBuilder(exchange common.Address, chainId int, signerHandler *signer.Signer, option Option) (*UtilsOrderBuilder, error) {

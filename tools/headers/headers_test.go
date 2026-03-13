@@ -6,7 +6,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ybina/polymarket-go/client/types"
+	"github.com/fuibox/polymarket-go/client/types"
 )
 
 func Test_CreateL2Headers(t *testing.T) {

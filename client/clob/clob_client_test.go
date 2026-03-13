@@ -10,14 +10,14 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/shopspring/decimal"
-	"github.com/ybina/polymarket-go/client/clob/clob_types"
-	config2 "github.com/ybina/polymarket-go/client/config"
-	"github.com/ybina/polymarket-go/client/constants"
-	"github.com/ybina/polymarket-go/client/relayer/builder"
-	"github.com/ybina/polymarket-go/client/signer"
-	"github.com/ybina/polymarket-go/client/types"
-	"github.com/ybina/polymarket-go/tools/headers"
-	"github.com/ybina/polymarket-go/turnkey"
+	"github.com/fuibox/polymarket-go/client/clob/clob_types"
+	config2 "github.com/fuibox/polymarket-go/client/config"
+	"github.com/fuibox/polymarket-go/client/constants"
+	"github.com/fuibox/polymarket-go/client/relayer/builder"
+	"github.com/fuibox/polymarket-go/client/signer"
+	"github.com/fuibox/polymarket-go/client/types"
+	"github.com/fuibox/polymarket-go/tools/headers"
+	"github.com/fuibox/polymarket-go/turnkey"
 )
 
 func initClobClientWithTurnkey(turnkeyAccount common.Address) (client *ClobClient, safeAddr *common.Address, err error) {
