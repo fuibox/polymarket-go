@@ -8,8 +8,8 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ybina/polymarket-go/client/relayer/model"
-	"github.com/ybina/polymarket-go/client/relayer/utils"
+	"github.com/fuibox/polymarket-go/client/relayer/model"
+	"github.com/fuibox/polymarket-go/client/relayer/utils"
 )
 
 func CreateSafeMultisendTransaction(

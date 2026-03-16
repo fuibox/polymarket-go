@@ -6,7 +6,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ybina/polymarket-go/client/constants"
+	"github.com/fuibox/polymarket-go/client/constants"
 )
 
 func TestBridgeClient_GetSupportedAssets(t *testing.T) {

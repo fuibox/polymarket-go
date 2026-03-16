@@ -7,12 +7,12 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ybina/polymarket-go/client/config"
-	"github.com/ybina/polymarket-go/client/constants"
-	"github.com/ybina/polymarket-go/client/relayer/model"
-	"github.com/ybina/polymarket-go/client/relayer/utils"
-	"github.com/ybina/polymarket-go/client/signer"
-	"github.com/ybina/polymarket-go/client/types"
+	"github.com/fuibox/polymarket-go/client/config"
+	"github.com/fuibox/polymarket-go/client/constants"
+	"github.com/fuibox/polymarket-go/client/relayer/model"
+	"github.com/fuibox/polymarket-go/client/relayer/utils"
+	"github.com/fuibox/polymarket-go/client/signer"
+	"github.com/fuibox/polymarket-go/client/types"
 )
 
 const createProxyTypeStr = "CreateProxy(address paymentToken,uint256 payment,address paymentReceiver)"

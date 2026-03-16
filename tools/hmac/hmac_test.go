@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ybina/polymarket-go/client/types"
+	"github.com/fuibox/polymarket-go/client/types"
 )
 
 func TestBuildAndVerifyHmac(t *testing.T) {

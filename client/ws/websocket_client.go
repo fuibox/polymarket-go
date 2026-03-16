@@ -12,11 +12,11 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/gorilla/websocket"
-	"github.com/ybina/polymarket-go/client/clob"
-	"github.com/ybina/polymarket-go/client/clob/clob_types"
-	"github.com/ybina/polymarket-go/client/config"
-	"github.com/ybina/polymarket-go/client/endpoint"
-	"github.com/ybina/polymarket-go/client/types"
+	"github.com/fuibox/polymarket-go/client/clob"
+	"github.com/fuibox/polymarket-go/client/clob/clob_types"
+	"github.com/fuibox/polymarket-go/client/config"
+	"github.com/fuibox/polymarket-go/client/endpoint"
+	"github.com/fuibox/polymarket-go/client/types"
 )
 
 type WebSocketClientOptions struct {

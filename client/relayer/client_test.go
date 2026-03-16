@@ -8,11 +8,11 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/shopspring/decimal"
-	"github.com/ybina/polymarket-go/client/relayer/builder"
-	"github.com/ybina/polymarket-go/client/signer"
-	"github.com/ybina/polymarket-go/client/types"
-	"github.com/ybina/polymarket-go/tools/headers"
-	"github.com/ybina/polymarket-go/turnkey"
+	"github.com/fuibox/polymarket-go/client/relayer/builder"
+	"github.com/fuibox/polymarket-go/client/signer"
+	"github.com/fuibox/polymarket-go/client/types"
+	"github.com/fuibox/polymarket-go/tools/headers"
+	"github.com/fuibox/polymarket-go/turnkey"
 )
 
 func newRelayClient() (*RelayClient, error) {

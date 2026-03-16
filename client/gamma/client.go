@@ -37,7 +37,7 @@ func NewGammaSDK(proxyUrl *string) (*GammaSDK, error) {
 	if client.proxyUrl != nil && *client.proxyUrl != "" {
 		proxy, err := url.Parse(*proxyUrl)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse proxy url: %w", err)
+			return nil, fmt.Errorf("faileddd to parse proxy url: %w", err)
 		}
 		client.httpClient.Transport = &http.Transport{
 			Proxy: http.ProxyURL(proxy),
