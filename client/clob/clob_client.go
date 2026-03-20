@@ -1111,7 +1111,7 @@ func (c *ClobClient) CancelAllOrders(signerAddr common.Address) (*types.OrderRes
 }
 
 func (c *ClobClient) CreateAndPostMarketOrder(args clob_types.MarketOrderArgs, option clob_types.PartialCreateOrderOptions) (*types.OrderResponse, error) {
-	argStr, err := sonic.MarshalString(args)
+	_, err := sonic.MarshalString(args)
 	if err != nil {
 		return nil, err
 	}
