@@ -4,19 +4,18 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/gorilla/websocket"
 	"github.com/fuibox/polymarket-go/client/clob"
 	"github.com/fuibox/polymarket-go/client/clob/clob_types"
 	"github.com/fuibox/polymarket-go/client/config"
 	"github.com/fuibox/polymarket-go/client/endpoint"
 	"github.com/fuibox/polymarket-go/client/types"
+	"github.com/gorilla/websocket"
 )
 
 type WebSocketClientOptions struct {
@@ -31,8 +30,6 @@ type WebSocketClientOptions struct {
 	MaxReconnectAttempts int
 
 	Debug bool
-
-	Logger *log.Logger
 
 	ProxyUrl string
 }
@@ -80,7 +77,6 @@ type WebSocketClient struct {
 	reconnectAttempts int
 	isConnecting      bool
 	shouldReconnect   bool
-	logger            *log.Logger
 }
 
 func NewWebSocketClient(clobClient *clob.ClobClient, options *WebSocketClientOptions) *WebSocketClient {
@@ -92,18 +88,12 @@ func NewWebSocketClient(clobClient *clob.ClobClient, options *WebSocketClientOpt
 		options.ReconnectDelay = 5 * time.Second
 	}
 
-	logger := options.Logger
-	if logger == nil {
-		logger = log.Default()
-	}
-
 	return &WebSocketClient{
 		clobClient:      clobClient,
 		options:         options,
 		callbacks:       &WebSocketCallbacks{},
 		done:            nil,
 		shouldReconnect: true,
-		logger:          logger,
 	}
 }
 
@@ -116,7 +106,6 @@ func (ws *WebSocketClient) Connect() error {
 	ws.mu.Lock()
 	if ws.isConnecting || (ws.conn != nil && ws.IsConnected()) {
 		ws.mu.Unlock()
-		log.Printf("Already connected or connecting")
 		return nil
 	}
 	ws.isConnecting = true
@@ -134,7 +123,7 @@ func (ws *WebSocketClient) Connect() error {
 		ws.mu.Unlock()
 		return fmt.Errorf("failed to derive API key: %w", err)
 	}
-	log.Printf("API key derived:%v\n", apiKey.Key)
+	_ = apiKey
 
 	fullURL := fmt.Sprintf("%s/ws/market", endpoint.WsUrl)
 	tlsConfig := &tls.Config{
@@ -171,18 +160,14 @@ func (ws *WebSocketClient) Connect() error {
 	ws.mu.Unlock()
 
 	conn.SetPongHandler(func(appData string) error {
-		log.Printf("Received CONTROL PONG: %s\n", appData)
 		return nil
 	})
 	conn.SetPingHandler(func(appData string) error {
-		log.Printf("Received CONTROL PING: %s\n", appData)
 		_ = ws.withConnWrite(func(c *websocket.Conn) error {
 			return c.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(5*time.Second))
 		})
 		return nil
 	})
-
-	log.Printf("WebSocket connected \n")
 
 	if err = ws.sendInitialSubscription(); err != nil {
 		ws.forceCloseWithReason(-1, fmt.Sprintf("send subscription failed: %v", err))
@@ -297,7 +282,6 @@ func (ws *WebSocketClient) sendInitialSubscription() error {
 		"assets_ids": assetIDs,
 		"type":       "market",
 	}
-	//log.Printf("subscribe request: %v\n", message)
 	return ws.withConnWrite(func(conn *websocket.Conn) error {
 		return conn.WriteJSON(message)
 	})
@@ -317,17 +301,12 @@ func (ws *WebSocketClient) sendSubscription(tokenIds []string) error {
 		"operation":  "subscribe",
 	}
 
-	//log.Printf("subscribe request: %v\n", message)
 	return ws.withConnWrite(func(conn *websocket.Conn) error {
 		return conn.WriteJSON(message)
 	})
 }
 
 func (ws *WebSocketClient) handleMessages() {
-	defer func() {
-		log.Printf("Message handler stopped \n")
-	}()
-
 	for {
 		ws.mu.RLock()
 		conn := ws.conn
@@ -347,10 +326,8 @@ func (ws *WebSocketClient) handleMessages() {
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
 			if ce, ok := err.(*websocket.CloseError); ok {
-				log.Printf("ReadMessage CloseError: code= %v, reason= %v\n", ce.Code, ce.Text)
 				ws.handleDisconnect(ce.Code, ce.Text)
 			} else {
-				log.Printf("ReadMessage error: %v\n", err)
 				ws.handleDisconnect(-1, err.Error())
 			}
 			return
@@ -360,11 +337,9 @@ func (ws *WebSocketClient) handleMessages() {
 			txt := string(message)
 
 			if txt == "PONG" {
-				log.Printf("Received TEXT PONG \n")
 				continue
 			}
 			if txt == "ping" || txt == "PING" {
-				log.Printf("Received TEXT PING, reply TEXT PONG \n")
 				_ = ws.withConnWrite(func(c *websocket.Conn) error {
 					reply := "pong"
 					if txt == "PING" {
@@ -394,7 +369,6 @@ func (ws *WebSocketClient) parseAndDispatch(data []byte) {
 	msg, err := types.ParseMarketChannelMessage(data)
 	if err != nil {
 		ws.handleError(fmt.Errorf("failed to parse message: %w", err))
-		log.Printf("Raw message: %s", string(data))
 		return
 	}
 
@@ -443,11 +417,9 @@ func (ws *WebSocketClient) pingWorker() {
 				return conn.WriteMessage(websocket.TextMessage, []byte("PING"))
 			})
 			if err != nil {
-				log.Printf("failed to send ping: %v\n", err.Error())
 				ws.handleDisconnect(-1, "ping send failed: "+err.Error())
 				return
 			}
-			log.Printf("Sent TEXT PING \n")
 		}
 	}
 }
@@ -455,8 +427,6 @@ func (ws *WebSocketClient) pingWorker() {
 func (ws *WebSocketClient) handleError(err error) {
 	if ws.callbacks.OnError != nil {
 		ws.callbacks.OnError(err)
-	} else {
-		log.Printf("Error: %v\n", err)
 	}
 }
 
@@ -495,7 +465,7 @@ func (ws *WebSocketClient) tryReconnect() {
 	ws.mu.Lock()
 	if ws.options.MaxReconnectAttempts > 0 && ws.reconnectAttempts >= ws.options.MaxReconnectAttempts {
 		ws.mu.Unlock()
-		log.Println("Max reconnect attempts reached")
+		ws.handleError(fmt.Errorf("max reconnect attempts reached (%d)", ws.options.MaxReconnectAttempts))
 		return
 	}
 
@@ -507,8 +477,6 @@ func (ws *WebSocketClient) tryReconnect() {
 	}
 	ws.mu.Unlock()
 
-	log.Printf(fmt.Sprintf("Scheduling reconnect attempt %d after %s...\n", attempt, delay))
-
 	if ws.callbacks.OnReconnect != nil {
 		ws.callbacks.OnReconnect(attempt)
 	}
@@ -519,9 +487,7 @@ func (ws *WebSocketClient) tryReconnect() {
 		ws.reconnectTimer = nil
 		ws.mu.Unlock()
 
-		log.Printf(fmt.Sprintf("Attempting reconnect %d... \n", attempt))
 		if err := ws.Connect(); err != nil {
-			log.Printf("Reconnect failed: %v\n", err)
 			ws.handleDisconnect(-1, "reconnect failed: "+err.Error())
 		}
 	})

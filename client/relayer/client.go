@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -23,9 +22,9 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/shopspring/decimal"
 	"github.com/fuibox/polymarket-go/client/endpoint"
 	"github.com/fuibox/polymarket-go/tools/headers"
+	"github.com/shopspring/decimal"
 
 	"github.com/fuibox/polymarket-go/client/config"
 	"github.com/fuibox/polymarket-go/client/constants"
@@ -404,7 +403,6 @@ func (c *RelayClient) DeployWithTurnkey(turnkeyAccount common.Address) (common.A
 	}
 
 	safeAddr := builder.Derive(turnkeyAccount, c.ContractConfig.SafeFactory)
-	log.Printf("builder.Derive SafeAddr: %s\n", safeAddr)
 
 	args := model.SafeCreateTransactionArgs{
 		FromAddress:     turnkeyAccount,
@@ -477,17 +475,6 @@ func (c *RelayClient) submit(req *model.TransactionRequest) (*ClientRelayerTrans
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
-	}
-
-	if len(respBytes) > 0 {
-		var pretty bytes.Buffer
-		if err := json.Indent(&pretty, respBytes, "", "  "); err == nil {
-			//log.Printf("submit response (pretty):\n%s\n", pretty.String())
-		} else {
-			log.Printf("submit response (raw): %s\n", string(respBytes))
-		}
-	} else {
-		log.Printf("submit response: <empty body>")
 	}
 
 	if len(respBytes) > 0 {
@@ -1142,7 +1129,6 @@ func (c *RelayClient) TransferUsdceFromSafeWithTurnkey(
 		return "", err
 	}
 	if resp != nil {
-		//log.Printf("Transfer submitted. txID=%s txHash=%s", resp.TransactionID, resp.TransactionHash)
 		return resp.TransactionHash, nil
 	}
 	return "", errors.New("response is empty")
@@ -1196,7 +1182,6 @@ func (c *RelayClient) TransferUsdceFromSafeWithPrivateKey(
 		return "", err
 	}
 	if resp != nil {
-		//log.Printf("Transfer submitted. txID=%s txHash=%s", resp.TransactionID, resp.TransactionHash)
 		return resp.TransactionHash, nil
 	}
 	return "", errors.New("response is empty")

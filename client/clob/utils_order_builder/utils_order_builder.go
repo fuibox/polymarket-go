@@ -70,7 +70,6 @@ func (b *UtilsOrderBuilder) BuildSignedOrder(data OrderData) (SignedOrder, error
 			return SignedOrder{}, err
 		}
 	}
-	//log.Printf("signed msg: %s", sig)
 	var side string
 	if order.Side == 0 {
 		side = "BUY"

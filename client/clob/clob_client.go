@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/shopspring/decimal"
 	"github.com/fuibox/polymarket-go/client/clob/clob_types"
 	"github.com/fuibox/polymarket-go/client/clob/order_builder"
 	"github.com/fuibox/polymarket-go/client/clob/utils_order_builder"
@@ -25,6 +23,7 @@ import (
 	"github.com/fuibox/polymarket-go/client/signer"
 	"github.com/fuibox/polymarket-go/client/types"
 	"github.com/fuibox/polymarket-go/tools/headers"
+	"github.com/shopspring/decimal"
 )
 
 // ClobClient represents CLOB client
@@ -541,7 +540,7 @@ func (c *ClobClient) getWithParams(endpoint string, params url.Values) ([]byte, 
 	if len(params) > 0 {
 		fullURL += "?" + params.Encode()
 	}
-	// log.Printf("GET full %s\n", fullURL)
+
 	req, err := http.NewRequest("GET", fullURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -580,7 +579,6 @@ func (c *ClobClient) getJSONWithParams(endpoint string, params url.Values, resul
 	if err != nil {
 		return err
 	}
-	//log.Printf("data: %s", string(data))
 	return sonic.Unmarshal(data, result)
 }
 
@@ -618,7 +616,6 @@ func (c *ClobClient) getJSONWithHeadersAndParams(endpoint string, headers interf
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
-	//log.Printf("getJSONWithHeadersAndParams body: %s\n", string(body))
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
@@ -968,7 +965,6 @@ func (c *ClobClient) postOrder(order utils_order_builder.SignedOrder, option clo
 		//if err != nil {
 		//	return nil, err
 		//}
-		//log.Printf("before post l2headers:%v\n", l2h)
 		err = c.postJSONWithHeaders(endpoint.PostOrder, l2headers, serializedBody, &result)
 		if err != nil {
 			return nil, err
@@ -1119,7 +1115,6 @@ func (c *ClobClient) CreateAndPostMarketOrder(args clob_types.MarketOrderArgs, o
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("CreateAndPostMarketOrder arg:%v\n", argStr)
 	signedOrder, err := c.createMarketOrder(args, option)
 	if err != nil {
 		return nil, err

@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"log"
 	"strings"
 )
 
@@ -17,7 +16,6 @@ func BuildPolyHmacSignature(secret string, timestamp string, method string, requ
 
 	base64Secret, err := base64.URLEncoding.DecodeString(secret)
 	if err != nil {
-		log.Printf("secret decode  error: %v\n", err)
 		base64Secret = []byte(secret)
 	}
 

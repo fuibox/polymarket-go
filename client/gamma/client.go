@@ -3,7 +3,6 @@ package gamma
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -329,7 +328,6 @@ func (g *GammaSDK) transformMarketData(item map[string]interface{}) Market {
 	itemBytes, _ := sonic.Marshal(item)
 	err := sonic.Unmarshal(itemBytes, &market)
 	if err != nil {
-		log.Printf("[GammaSDK] unmarshal Market failed: %v, raw=%s", err, string(itemBytes))
 		return Market{}
 	}
 
