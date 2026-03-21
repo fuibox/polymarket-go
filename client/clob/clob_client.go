@@ -452,8 +452,13 @@ func (c *ClobClient) GetOrder(funder common.Address, orderID string) (*types.Ope
 	}
 
 	var result types.OpenOrder
-	err = c.getJSONWithHeaders(endpoint, headers, &result)
-	return &result, err
+	if err = c.getJSONWithHeaders(endpoint, headers, &result); err != nil {
+		return nil, err
+	}
+	if result.ID == "" {
+		return nil, fmt.Errorf("order not found: %s", orderID)
+	}
+	return &result, nil
 }
 
 // GetTrades gets a single page of trades with pagination support
