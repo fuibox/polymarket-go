@@ -19,17 +19,22 @@ polymarket-go/
 ```
 client/
 ├── clob/                    # CLOB 交易客户端（核心）
-│   ├── clob_client.go       # 主客户端：下单、查询、认证（~1169 行）
+│   ├── clob_client.go       # 主客户端：下单、查询、认证
+│   ├── typed_client.go      # TypedClobClient：返回 *SDKError 的 Wrapper（新）
 │   ├── clob_types/          # 订单参数类型（OrderArgs、MarketOrderArgs 等）
 │   └── order_builder/       # 订单签名与构造（价格取整、合约路由）
 │
 ├── relayer/                 # 链上 Safe 钱包交互
-│   ├── client.go            # 主客户端：部署、授权、赎回、转账（~1542 行）
+│   ├── client.go            # 主客户端：部署、授权、赎回、转账
 │   └── model/               # Safe 交易模型（SafeTransaction、TransactionRequest）
 │
 ├── data/                    # Data API 客户端
-│   ├── client.go            # 持仓、成交、统计查询（~491 行）
+│   ├── client.go            # 持仓、成交、统计查询
+│   ├── typed_client.go      # TypedDataSDK：返回 *SDKError 的 Wrapper（新）
 │   └── types.go             # 数据类型（Position、ClosedPosition、Activity 等）
+│
+├── errors/                  # 统一错误类型（新）
+│   └── errors.go            # SDKError、ErrCode、工具方法
 │
 ├── bridge/
 │   └── bridge.go            # 跨链桥接客户端
@@ -45,7 +50,7 @@ client/
 │
 ├── constants/               # 合约地址、签名类型、访问级别常量
 ├── config/                  # ContractConfig（各链合约地址映射）
-├── endpoint/                # 所有 API 路径常量（58 个端点）
+├── endpoint/                # 所有 API 路径常量
 └── signer/                  # 签名器（PrivateKey / Turnkey）
 ```
 
@@ -67,12 +72,15 @@ tools/
 
 | 需要做什么 | 看哪个文件 |
 |---|---|
-| 下单 / 撤单 | `client/clob/clob_client.go` |
+| 下单 / 撤单（原有接口） | `client/clob/clob_client.go` |
+| 下单 / 撤单（typed 错误） | `client/clob/typed_client.go` |
+| 持仓 / 成交查询（原有接口） | `client/data/client.go` |
+| 持仓 / 成交查询（typed 错误） | `client/data/typed_client.go` |
+| 错误类型定义 / ErrCode | `client/errors/errors.go` |
 | 订单签名逻辑 / 价格取整 | `client/clob/order_builder/` |
 | 订单参数类型 | `client/clob/clob_types/` |
 | 链上 Safe 交易 / Token 授权 | `client/relayer/client.go` |
 | Safe 交易数据结构 | `client/relayer/model/` |
-| 持仓 / 成交 / 统计查询 | `client/data/client.go` |
 | 跨链桥接 | `client/bridge/bridge.go` |
 | 实时行情订阅 | `client/ws/websocket_client.go` |
 | 核心数据类型（Order、Trade） | `client/types/types.go` |

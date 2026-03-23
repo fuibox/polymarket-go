@@ -117,31 +117,77 @@ Nonce 错误会导致链上交易失败或被覆盖。
 
 ## 5) 错误处理约定
 
-### 5.1 区分可重试与不可重试错误
+### 5.1 错误类型体系（`client/errors/`）
 
-| 错误类型 | 示例 | 处理方式 |
-|---|---|---|
-| 客户端错误（4xx） | 参数非法、签名错误、订单不存在 | 不重试，直接返回错误 |
-| 服务端错误（5xx） | 服务暂时不可用 | 可退避重试 |
-| 限流（429） | Too Many Requests | 退避重试，遵守 Retry-After |
-| 网络超时 | 请求未到达或响应丢失 | 先查状态再决定是否重试（见 §1.4） |
-| 链上 revert | 合约执行失败 | 不重试，排查参数（授权、Nonce、合约路由） |
-| 链上 RPC 网络错误 | 节点超时、连接断开 | 可重试（无副作用） |
+SDK 提供统一结构化错误类型 `*sdkerrors.SDKError`，上层通过 `Code` 字段判断处理策略。
 
-### 5.2 错误必须携带上下文
-返回错误时须包含足够的定位信息：
+**ErrCode 对照表：**
+
+| ErrCode | 值 | 含义 | 处理策略 |
+|---|---|---|---|
+| `ErrCodeBadRequest` | 400 | 参数错误 | 不重试，修正参数 |
+| `ErrCodeUnauthorized` | 401 | 认证失效 | 重新 derive API Key |
+| `ErrCodeForbidden` | 403 | 权限不足 | 不重试，上报 |
+| `ErrCodeNotFound` | 404 | 资源不存在 | 正常业务处理 |
+| `ErrCodeRateLimit` | 429 | 限流 | 退避重试 |
+| `ErrCodeServerError` | 500 | 服务端错误 | 退避重试 |
+| `ErrCodeNetwork` | 1001 | 网络错误 | 退避重试 |
+| `ErrCodeUnmarshal` | 1002 | 响应解析失败 | 不重试，排查 |
+| `ErrCodeNotFoundBody` | 1003 | HTTP 200 但响应体为空 | 同 NotFound（Polymarket 已知行为） |
+
+**快捷判断方法：**
+```go
+sdkErr.IsRetryable()  // 429 / 5xx / 1001
+sdkErr.IsNotFound()   // 404 + 1003
+sdkErr.IsAuthError()  // 401 / 403
+```
+
+### 5.2 Typed Wrapper 使用规范
+
+**新代码必须使用 Typed Wrapper，禁止对 `*SDKError` 做字符串匹配：**
 
 ```go
 // 正确
-fmt.Errorf("cancel order %s: %w", orderID, err)
+typed := clob.NewTypedClobClient(client)
+order, sdkErr := typed.GetOrder(addr, id)
+if sdkErr != nil {
+    switch {
+    case sdkErr.IsNotFound():
+    case sdkErr.IsAuthError():
+    case sdkErr.IsRetryable():
+    }
+}
 
-// 错误 — 丢失上下文
-return err
+// 错误 — 字符串匹配，脆弱且不可维护
+if strings.Contains(err.Error(), "404") { ... }
 ```
 
-### 5.3 不得吞掉错误
+**新增方法时的规范：**
+- `ClobClient` 新方法 → 同步在 `typed_client.go` 中添加对应 typed 版本
+- `DataSDK` 新方法 → 同步在 `data/typed_client.go` 中添加对应 typed 版本
+- 尚未 typed 化的方法通过 `.Inner()` 访问原客户端
+
+### 5.3 错误必须携带上下文
+返回错误时须包含足够的定位信息：
+
+```go
+// 原有代码（error 接口）
+fmt.Errorf("cancel order %s: %w", orderID, err)
+
+// Typed 代码（SDKError）
+sdkerrors.Wrap(sdkerrors.ErrCodeUnauthorized, "failed to create L2 headers", err)
+```
+
+### 5.4 不得吞掉错误
 不得用空的 `if err != nil {}` 或仅打日志而不返回错误。
 调用方有权决定如何处理错误，SDK 不应替调用方决策。
+
+### 5.5 链上错误处理
+| 错误类型 | 处理方式 |
+|---|---|
+| 链上 revert | 不重试，排查参数（授权、Nonce、合约路由） |
+| 链上 RPC 网络错误 | 可重试（无副作用） |
+| 网络超时（下单） | 先查订单状态，确认不存在再重新提交（见 §1.4） |
 
 ---
 

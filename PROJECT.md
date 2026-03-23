@@ -115,6 +115,89 @@ CLOB（中心化限价订单簿）交易核心客户端。
 
 ---
 
+---
+
+## 错误处理体系（`client/errors/`）
+
+### 背景
+SDK 原有错误均为 `fmt.Errorf` 字符串，上层无法通过类型判断错误类别，只能做脆弱的字符串匹配。
+
+### 设计原则
+- **不破坏现有接口**：原有所有方法签名不变，旧代码零改动
+- **新增 Typed Wrapper**：`TypedClobClient` / `TypedDataSDK` 与原客户端并存，上层按需逐步迁移
+- **迁移成本极低**：只需将原客户端包一层 `NewTypedClobClient(client)`
+
+### 核心类型（`client/errors/errors.go`）
+
+```go
+type ErrCode int
+
+const (
+    ErrCodeBadRequest   ErrCode = 400  // 参数错误，不可重试
+    ErrCodeUnauthorized ErrCode = 401  // 认证失效，需重新获取 API Key
+    ErrCodeForbidden    ErrCode = 403  // 权限不足
+    ErrCodeNotFound     ErrCode = 404  // 资源不存在
+    ErrCodeRateLimit    ErrCode = 429  // 限流，退避后重试
+    ErrCodeServerError  ErrCode = 500  // 服务端错误，可重试
+    ErrCodeNetwork      ErrCode = 1001 // 网络错误，可重试
+    ErrCodeUnmarshal    ErrCode = 1002 // 响应解析失败
+    ErrCodeNotFoundBody ErrCode = 1003 // HTTP 200 但响应体为空（Polymarket 已知行为）
+)
+
+type SDKError struct {
+    Code    ErrCode // 上层 switch 的主要依据
+    Message string  // 人类可读描述
+    Raw     string  // 原始响应体，调试用
+    Cause   error   // 底层原始 error
+}
+
+// 快捷判断方法
+func (e *SDKError) IsRetryable() bool  // 429 / 5xx / 网络错误
+func (e *SDKError) IsNotFound() bool   // 404 + ErrCodeNotFoundBody
+func (e *SDKError) IsAuthError() bool  // 401 / 403
+```
+
+### Typed Wrapper
+
+| Wrapper | 文件 | 包装对象 |
+|---|---|---|
+| `TypedClobClient` | `client/clob/typed_client.go` | `*ClobClient` |
+| `TypedDataSDK` | `client/data/typed_client.go` | `*DataSDK` |
+
+**已 typed 化的方法：**
+
+`TypedClobClient`：`GetOrder`、`CreateAndPostOrder`、`CreateAndPostMarketOrder`、`CancelOrder`、`CancelAllOrders`
+
+`TypedDataSDK`：`GetCurrentPositions`、`GetClosedPositions`、`GetTrades`、`GetUserActivity`
+
+**未 typed 化的方法**：通过 `.Inner()` 访问原客户端继续使用。
+
+### 迁移示例
+
+```go
+// 原来（不变）
+client := clob.NewClobClient(...)
+
+// 包一层即可使用 typed 版本
+typed := clob.NewTypedClobClient(client)
+
+order, sdkErr := typed.GetOrder(addr, id)
+if sdkErr != nil {
+    switch {
+    case sdkErr.IsNotFound():   // 订单不存在
+    case sdkErr.IsAuthError():  // 重新 derive API Key
+    case sdkErr.IsRetryable():  // 退避重试
+    default:
+        // 通过 sdkErr.Code 精确处理
+    }
+}
+
+// 未迁移的方法走原客户端
+markets, err := typed.Inner().GetMarkets(cursor)
+```
+
+---
+
 ## 工具包（`tools/`）
 
 | 包 | 功能 |
