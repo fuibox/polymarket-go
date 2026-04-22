@@ -14,14 +14,26 @@ type RequestArgs struct {
 }
 
 type OrderArgs struct {
-	TokenID    string          `json:"tokenID"`
-	Price      decimal.Decimal `json:"price"`
-	Size       decimal.Decimal `json:"size"`
-	Side       types.Side      `json:"side"`
-	FeeRateBps int             `json:"feeRateBps,omitempty"`
-	Nonce      int             `json:"nonce,omitempty"`
-	Expiration int             `json:"expiration,omitempty"`
-	Taker      common.Address  `json:"taker,omitempty"`
+	TokenID string          `json:"tokenID"`
+	Price   decimal.Decimal `json:"price"`
+	Size    decimal.Decimal `json:"size"`
+	Side    types.Side      `json:"side"`
+
+	// FeeRateBps is v1-only — v2 sets fees at match time.
+	FeeRateBps int `json:"feeRateBps,omitempty"`
+	// Nonce is v1-only — v2 uses timestamp for uniqueness.
+	Nonce int `json:"nonce,omitempty"`
+	// Expiration (seconds) is v1-only — v2 removed this field from the signed order.
+	Expiration int `json:"expiration,omitempty"`
+	// Taker is v1-only — v2 removed this field from the signed order.
+	Taker common.Address `json:"taker,omitempty"`
+
+	// BuilderCode is the v2 builder identifier written into Order.Builder.
+	// Expected as a 0x-prefixed 32-byte hex string; empty string → zero bytes32.
+	BuilderCode string `json:"builderCode,omitempty"`
+	// Metadata is an arbitrary 32-byte tag written into Order.Metadata.
+	// Expected as a 0x-prefixed 32-byte hex string; empty string → zero bytes32.
+	Metadata string `json:"metadata,omitempty"`
 }
 
 type PartialCreateOrderOptions struct {
@@ -38,19 +50,24 @@ type ClobOption struct {
 }
 
 type MarketOrderArgs struct {
-	TokenID string `json:"token_id"`
+	TokenID string          `json:"token_id"`
+	Amount  decimal.Decimal `json:"amount"`
+	Side    types.Side      `json:"side"`
+	Price   decimal.Decimal `json:"price"`
 
-	Amount decimal.Decimal `json:"amount"`
-
-	Side types.Side `json:"side"`
-
-	Price decimal.Decimal `json:"price"`
-
+	// FeeRateBps is v1-only — v2 sets fees at match time.
 	FeeRateBps int `json:"fee_rate_bps"`
-
+	// Nonce is v1-only — v2 uses timestamp for uniqueness.
 	Nonce int `json:"nonce"`
-
+	// Taker is v1-only — v2 removed this field from the signed order.
 	Taker common.Address `json:"taker"`
 
 	OrderType types.OrderType `json:"order_type"`
+
+	// BuilderCode is the v2 builder identifier written into Order.Builder.
+	// Expected as a 0x-prefixed 32-byte hex string; empty string → zero bytes32.
+	BuilderCode string `json:"builderCode,omitempty"`
+	// Metadata is an arbitrary 32-byte tag written into Order.Metadata.
+	// Expected as a 0x-prefixed 32-byte hex string; empty string → zero bytes32.
+	Metadata string `json:"metadata,omitempty"`
 }

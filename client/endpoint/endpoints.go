@@ -55,4 +55,6 @@ const (
 	PostOrders                    = "/orders"
 	GetFeeRate                    = "/fee-rate"
 	GetBuilderTrades              = "/builder/trades"
+	// v2 — conditionID appended at call site.
+	GetClobMarketInfo = "/clob-market-info/"
 )

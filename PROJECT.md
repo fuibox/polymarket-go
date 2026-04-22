@@ -241,3 +241,86 @@ markets, err := typed.Inner().GetMarkets(cursor)
 5. **Safe Nonce**：每笔链上交易必须使用正确的 Safe Nonce，避免重放。
 6. **认证 Header 时效**：L1/L2 Header 含时间戳，服务端有时间窗口校验。
 7. **无 main()**：本项目为 SDK，不含可执行入口。
+
+---
+
+## CLOB v2 迁移（2026-04-28 切换）
+
+Polymarket 将在 **2026-04-28 约 11:00 UTC** 硬切到 CLOB v2。v2 前端生效后 v1 后端下线，所有挂单清空。v1/v2 的交易链路在本 SDK 内并行存在，由 `ClobClient.ProtocolVersion` 选择。
+
+### 关键差异
+
+| 项 | v1 | v2 |
+|---|---|---|
+| EIP-712 domain version | `"1"` | `"2"` |
+| Exchange 地址（Polygon） | `0x4bFb41…982E` | `0xE11118…996B` |
+| NegExchange 地址（Polygon） | `0xC5d563…f80a` | `0xe2222d…0F59` |
+| 签名 Order 移除字段 | — | `taker` / `expiration` / `nonce` / `feeRateBps` |
+| 签名 Order 新增字段 | — | `timestamp` (ms) / `metadata` (bytes32) / `builder` (bytes32) |
+| 手续费来源 | 订单里的 `feeRateBps` | 撮合时协议设置；查询 `GET /clob-market-info/{conditionID}` |
+| 抵押物 | USDC.e | **pUSD**（Onramp `wrap()` 包装 USDC.e 得到） |
+| Builder 归因 | `POLY_BUILDER_*` HMAC Header | 订单 `builder` 字段；v2 后端忽略 Header（已保留原有代码，4/28 后清理） |
+| L1/L2 auth | — | 不变 |
+| Cancel / 查询 / 订单簿 | — | 不变 |
+
+### 用法
+
+```go
+// v1（默认，现状）
+client, _ := clob.NewClobClient(&clob.ClientConfig{
+    Host: "https://clob.polymarket.com",
+    ChainID: 137,
+    Signer: s,
+    APIKey: creds,
+})
+
+// v2（切换前用 clob-v2.polymarket.com 测试；4/28 后直接用生产 host）
+client, _ := clob.NewClobClient(&clob.ClientConfig{
+    Host: "https://clob-v2.polymarket.com",
+    ChainID: 137,
+    Signer: s,
+    APIKey: creds,
+    ProtocolVersion: types.ProtocolVersionV2,
+    DefaultBuilderCode: "0x…32-byte hex…", // 可选
+})
+
+// 下单接口签名不变
+resp, err := client.CreateAndPostOrder(args, opts)
+```
+
+### pUSD 资金流
+
+```go
+// 首次使用：包装 USDC.e -> pUSD，并批量授权 v2 合约
+_, _ = relay.WrapCollateralWithPrivateKey(decimal.NewFromInt(100))
+_, _ = relay.ApprovePUSDForPolymarketWithPrivateKey()
+
+// 提现时解包装
+_, _ = relay.UnwrapCollateralWithPrivateKey(decimal.NewFromInt(50))
+```
+
+### v2 新增 / 修改文件
+
+- `client/clob/utils_order_builder_v2/` — v2 EIP-712 签名实现
+- `client/clob/order_builder/order_builder_v2.go` — v2 订单构造方法
+- `client/clob/clob_client_v2.go` — v2 交易 / 查询方法（`GetClobMarketInfo`）
+- `client/relayer/client_v2.go` — pUSD wrap/unwrap/approve
+- `client/config/config.go` — `ExchangeV2` / `NegExchangeV2` / `PUSD` / `CollateralOnramp`
+- `client/types/types.go` — `ProtocolVersion` / `SignedOrderV2`
+- `client/clob/clob_types/clob_types.go` — `BuilderCode` / `Metadata` 字段
+
+### 4/28 之后待删除（不要在本 PR 内一起改）
+
+- 整个 `client/clob/utils_order_builder/` 包
+- `OrderArgs.FeeRateBps` / `Nonce` / `Expiration` / `Taker`
+- `tools/headers/headers.go` 中 Builder HMAC 相关（`L2WithBuilderHeader` / `BuilderConfig` / `GenerateBuilderHeaders` / `InsertBuilderHeaders`）
+- `ClobClient.ResolveFeeRateBps` / `GetFeeRateBps`
+- `ContractConfig.Exchange` / `NegExchange` v1 地址（由 v2 别名提升）
+- `ProtocolVersion` 字段本身
+
+### 需验证的假设
+
+1. **Amoy v2 地址**：Polymarket 文档暂未公布，`ContractConfig.ExchangeV2` / `NegExchangeV2` / `PUSD` / `CollateralOnramp` 对 chain 80002 是零地址。v2 on Amoy 调用会因此失败，直到公布后补齐。
+2. **CollateralOnramp ABI**：代码按 `wrap(uint256)` / `unwrap(uint256)` 实现。Polymarket 尚未发布正式 ABI；上生产前必须对照合约字节码验证函数签名。
+3. **v2 `POST /order` 响应体**：假定与 v1 的 `OrderResponse` 同构；testnet 首次联调需确认。
+4. **v2 cancel 接口**：假定 body / endpoint 与 v1 相同。testnet 需确认。

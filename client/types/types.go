@@ -40,6 +40,42 @@ const (
 	OrderTypeFAK OrderType = "FAK"
 )
 
+// ProtocolVersion selects which CLOB backend the client targets. Polymarket
+// cuts over to v2 on 2026-04-28 — after that date v1 is dead and the field
+// should default to V2.
+type ProtocolVersion int
+
+const (
+	ProtocolVersionV1 ProtocolVersion = 1
+	ProtocolVersionV2 ProtocolVersion = 2
+)
+
+// SignedOrderV2 is the JSON wire shape of a signed order for CLOB v2.
+//
+// The v2 migration doc says taker/expiration were removed from the EIP-712
+// hash — and that's still true (the 11-field struct hash in
+// utils_order_builder_v2 does not include them). HOWEVER the v2 REST API
+// body still carries these fields as pass-through metadata; omitting them
+// causes the server to return HTTP 500 "could not run the execution" when
+// its matcher hits a missing/null field. Matches clob-client-v2's NewOrderV2
+// wrapper exactly.
+type SignedOrderV2 struct {
+	Salt          int64         `json:"salt"`
+	Maker         string        `json:"maker"`
+	Signer        string        `json:"signer"`
+	Taker         string        `json:"taker"` // hex address, always 0x0 for us
+	TokenID       string        `json:"tokenId"`
+	MakerAmount   string        `json:"makerAmount"`
+	TakerAmount   string        `json:"takerAmount"`
+	Side          string        `json:"side"`
+	SignatureType SignatureType `json:"signatureType"`
+	Timestamp     string        `json:"timestamp"`
+	Expiration    string        `json:"expiration"` // unix seconds, "0" = never
+	Metadata      string        `json:"metadata"`
+	Builder       string        `json:"builder"`
+	Signature     string        `json:"signature"`
+}
+
 type SignatureType int
 
 const (
@@ -314,11 +350,22 @@ const (
 type BalanceAllowanceParams struct {
 	AssetType AssetType `json:"asset_type"`
 	TokenID   *string   `json:"token_id,omitempty"`
+	// SignatureType tells the server which wallet kind the API-key owner is
+	// using (EOA=0, POLY_PROXY=1, POLY_GNOSIS_SAFE=2). Without it the server
+	// can't resolve which Safe to query and returns "not enough balance /
+	// allowance". Matches py-clob-client's `signature_type` query param.
+	SignatureType *int `json:"signature_type,omitempty"`
 }
 
 type BalanceAllowanceResponse struct {
-	Balance   string `json:"balance"`
-	Allowance string `json:"allowance"`
+	Balance string `json:"balance"`
+	// Allowance is the v1 shape (single scalar). Kept for backward compat on
+	// servers still returning the legacy response — may be empty on v2.
+	Allowance string `json:"allowance,omitempty"`
+	// Allowances is the v2 shape: map of spender address (0x-prefixed) →
+	// allowance amount as decimal string. Populated by the v2 CLOB server;
+	// empty on v1.
+	Allowances map[string]string `json:"allowances,omitempty"`
 }
 
 type OrderScoringParams struct {

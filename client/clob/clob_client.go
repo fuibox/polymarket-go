@@ -37,6 +37,14 @@ type ClobClient struct {
 	useServerTime  bool
 	httpClient     *http.Client
 	contractConfig config.ContractConfig
+
+	// protocolVersion selects v1 or v2 trade pipeline. Default V1 for backward
+	// compatibility. Switch to V2 once pointing at clob-v2.polymarket.com (or
+	// after the 2026-04-28 cutover when v1 backend is gone).
+	protocolVersion types.ProtocolVersion
+	// defaultBuilderCode is a v2-only default for Order.Builder when the caller
+	// doesn't provide args.BuilderCode. 0x-prefixed 32-byte hex; empty → zero.
+	defaultBuilderCode string
 }
 
 type ClientConfig struct {
@@ -49,6 +57,13 @@ type ClientConfig struct {
 	Timeout       time.Duration
 	ProxyUrl      string
 	Signer        *signer.Signer
+
+	// ProtocolVersion: V1 (default) or V2. v2 enables the new EIP-712 domain
+	// and order fields for the Polymarket CLOB v2 cutover.
+	ProtocolVersion types.ProtocolVersion
+	// DefaultBuilderCode is written into Order.Builder on v2 when OrderArgs
+	// don't supply one. Ignored on v1.
+	DefaultBuilderCode string
 }
 
 func NewClobClient(config *ClientConfig) (*ClobClient, error) {
@@ -63,6 +78,11 @@ func NewClobClient(config *ClientConfig) (*ClobClient, error) {
 		timeout = 30 * time.Second
 	}
 
+	pv := config.ProtocolVersion
+	if pv == 0 {
+		pv = types.ProtocolVersionV1
+	}
+
 	client := &ClobClient{
 		host:          host,
 		chainID:       config.ChainID,
@@ -74,6 +94,8 @@ func NewClobClient(config *ClientConfig) (*ClobClient, error) {
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
+		protocolVersion:    pv,
+		defaultBuilderCode: config.DefaultBuilderCode,
 	}
 	if config.ProxyUrl != "" {
 		proxyUrl, err := url.Parse(config.ProxyUrl)
@@ -383,10 +405,17 @@ func (c *ClobClient) GetClosedOnlyMode(funder common.Address) (*types.BanStatus,
 	return &result, err
 }
 
-// GetBalanceAllowance gets the balance and allowance for the funder.
-// Requires L2 authentication.
-// Set params.AssetType to AssetTypeCollateral for USDC or AssetTypeConditional for a YES/NO token.
-// When AssetTypeConditional, params.TokenID must be set.
+// GetBalanceAllowance gets the balance and allowance for the funder tied to
+// the api-key-owning address. Requires L2 authentication.
+//
+// The `funder` argument is what's placed in POLY_ADDRESS — it must be the
+// address that OWNS the api key (EOA for PrivateKey signers, Turnkey account
+// for Turnkey signers), NOT the Safe. The server derives the Safe from
+// params.SignatureType. Pass SignatureType=constants.POLY_GNOSIS_SAFE for a
+// Polymarket proxy user; omitting it defaults to EOA-only lookup and returns
+// zero balances.
+//
+// HMAC signs the BARE path (without query) — matches py-clob-client v1.
 func (c *ClobClient) GetBalanceAllowance(funder common.Address, params *types.BalanceAllowanceParams) (*types.BalanceAllowanceResponse, error) {
 	if c.creds == nil {
 		return nil, fmt.Errorf("API credentials are required")
@@ -408,11 +437,49 @@ func (c *ClobClient) GetBalanceAllowance(funder common.Address, params *types.Ba
 		if params.TokenID != nil {
 			queryParams.Add("token_id", *params.TokenID)
 		}
+		if params.SignatureType != nil {
+			queryParams.Add("signature_type", strconv.Itoa(*params.SignatureType))
+		}
 	}
 
 	var result types.BalanceAllowanceResponse
 	err = c.getJSONWithHeadersAndParams(endpoint.GetBalanceAllowance, l2Headers, queryParams, &result)
 	return &result, err
+}
+
+// UpdateBalanceAllowance asks the CLOB server to refresh its cached view of
+// the funder's on-chain balance/allowance. Requires L2 auth. Signatures and
+// query param rules identical to GetBalanceAllowance — including the
+// signature_type requirement for proxy/Safe wallets.
+//
+// Matches py-clob-client: GET method, HMAC over BARE path, signature_type in
+// query params.
+func (c *ClobClient) UpdateBalanceAllowance(funder common.Address, params *types.BalanceAllowanceParams) error {
+	if c.creds == nil {
+		return fmt.Errorf("API credentials are required")
+	}
+
+	l2Headers, err := c.createL2Headers(funder, &types.L2HeaderArgs{
+		Method:      "GET",
+		RequestPath: endpoint.UpdateBalanceAllowance,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create L2 headers: %w", err)
+	}
+
+	queryParams := url.Values{}
+	if params != nil {
+		queryParams.Add("asset_type", string(params.AssetType))
+		if params.TokenID != nil {
+			queryParams.Add("token_id", *params.TokenID)
+		}
+		if params.SignatureType != nil {
+			queryParams.Add("signature_type", strconv.Itoa(*params.SignatureType))
+		}
+	}
+
+	var result map[string]any
+	return c.getJSONWithHeadersAndParams(endpoint.UpdateBalanceAllowance, l2Headers, queryParams, &result)
 }
 
 // DeleteApiKey deletes API key
@@ -687,9 +754,13 @@ func (c *ClobClient) postJSONWithHeaders(endpoint string, headers interface{}, d
 		respErr := &ErrResp{}
 		err = sonic.Unmarshal(body, respErr)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal response of code 400: %w, body:%s\n", err, string(body))
+			return fmt.Errorf("failed to unmarshal response of code %d: %w, body:%s\n", resp.StatusCode, err, string(body))
 		}
-		return fmt.Errorf("%s", respErr.Error)
+		// Include full raw body so callers can see fields beyond `error`
+		// (the v2 server sometimes stuffs details like `details`, `errorMsg`,
+		// or extra context into sibling keys; masking them makes debugging
+		// impossible).
+		return fmt.Errorf("%s — HTTP %d body: %s", respErr.Error, resp.StatusCode, string(body))
 	}
 
 	if result != nil {
@@ -840,6 +911,13 @@ func (c *ClobClient) CreateAndPostOrder(args clob_types.OrderArgs, option clob_t
 		if option.SafeAccount == constants.ZERO_ADDRESS {
 			return nil, fmt.Errorf("safe account is required")
 		}
+	}
+	if c.protocolVersion == types.ProtocolVersionV2 {
+		signedOrderV2, err := c.createOrderV2(args, option)
+		if err != nil {
+			return nil, err
+		}
+		return c.postOrderV2(signedOrderV2, option)
 	}
 	signedOrder, err := c.createOrder(args, option)
 	if err != nil {
@@ -1119,6 +1197,13 @@ func (c *ClobClient) CreateAndPostMarketOrder(args clob_types.MarketOrderArgs, o
 	_, err := sonic.MarshalString(args)
 	if err != nil {
 		return nil, err
+	}
+	if c.protocolVersion == types.ProtocolVersionV2 {
+		signedOrderV2, err := c.createMarketOrderV2(args, option)
+		if err != nil {
+			return nil, err
+		}
+		return c.postOrderV2(signedOrderV2, option)
 	}
 	signedOrder, err := c.createMarketOrder(args, option)
 	if err != nil {
