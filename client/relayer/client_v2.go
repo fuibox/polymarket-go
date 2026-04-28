@@ -326,6 +326,117 @@ func (c *RelayClient) approveCTFV2(exec execFunc) (*ClientRelayerTransactionResp
 	return exec(txs, "setApprovalForAll CTF to v2 polymarket contracts")
 }
 
+// TransferPUSDFromSafeWithPrivateKey transfers pUSD out of the Safe to an
+// arbitrary recipient. Mirrors TransferUsdceFromSafeWithPrivateKey — pUSD uses
+// the same 6-decimal scale and standard ERC-20 transfer selector.
+func (c *RelayClient) TransferPUSDFromSafeWithPrivateKey(
+	targetAddr common.Address,
+	amount decimal.Decimal,
+) (string, error) {
+	if c.Signer == nil {
+		return "", errors.New("signer is required")
+	}
+	if c.Signer.SignerType() != signer.PrivateKey {
+		return "", errors.New("signer is not a private key")
+	}
+	if c.BuilderConfig == nil {
+		return "", errors.New("builder config is required")
+	}
+	if targetAddr == constants.ZERO_ADDRESS {
+		return "", errors.New("target address is required")
+	}
+	pusd := c.ContractConfig.PUSD
+	if pusd == constants.ZERO_ADDRESS {
+		return "", fmt.Errorf("pUSD not configured for chain %d", c.ChainID)
+	}
+
+	scaled, err := scaleUSDC(amount)
+	if err != nil {
+		return "", err
+	}
+
+	data, err := c.encodeTransfer(targetAddr, scaled)
+	if err != nil {
+		return "", err
+	}
+
+	txs := []model.SafeTransaction{
+		{
+			To:        pusd,
+			Operation: model.Call,
+			Data:      data,
+			Value:     "0",
+		},
+	}
+	metadata := fmt.Sprintf("Transfer pUSD to %s", targetAddr.Hex())
+
+	resp, err := c.ExecuteWithPrivateKey(txs, metadata)
+	if err != nil {
+		return "", err
+	}
+	if resp != nil {
+		return resp.TransactionHash, nil
+	}
+	return "", errors.New("response is empty")
+}
+
+// TransferPUSDFromSafeWithTurnkey is the Turnkey-signed variant of
+// TransferPUSDFromSafeWithPrivateKey.
+func (c *RelayClient) TransferPUSDFromSafeWithTurnkey(
+	turnkeyAccount common.Address,
+	targetAddr common.Address,
+	amount decimal.Decimal,
+) (string, error) {
+	if c.Signer == nil {
+		return "", errors.New("signer is required")
+	}
+	if c.Signer.SignerType() != signer.Turnkey {
+		return "", errors.New("signer is not a turnkey")
+	}
+	if c.BuilderConfig == nil {
+		return "", errors.New("builder config is required")
+	}
+	if turnkeyAccount == constants.ZERO_ADDRESS {
+		return "", errors.New("turnkey account is required")
+	}
+	if targetAddr == constants.ZERO_ADDRESS {
+		return "", errors.New("target address is required")
+	}
+	pusd := c.ContractConfig.PUSD
+	if pusd == constants.ZERO_ADDRESS {
+		return "", fmt.Errorf("pUSD not configured for chain %d", c.ChainID)
+	}
+
+	scaled, err := scaleUSDC(amount)
+	if err != nil {
+		return "", err
+	}
+
+	data, err := c.encodeTransfer(targetAddr, scaled)
+	if err != nil {
+		return "", err
+	}
+
+	txs := []model.SafeTransaction{
+		{
+			To:        pusd,
+			Operation: model.Call,
+			Data:      data,
+			Value:     "0",
+		},
+	}
+	metadata := fmt.Sprintf("Transfer pUSD to %s", targetAddr.Hex())
+
+	resp, err := c.ExecuteWithTurnkey(txs, metadata, turnkeyAccount)
+	if err != nil {
+		return "", err
+	}
+	if resp != nil {
+		return resp.TransactionHash, nil
+	}
+	return "", errors.New("response is empty")
+}
+
 func (c *RelayClient) approvePUSD(exec execFunc) (*ClientRelayerTransactionResponse, error) {
 	pusd := c.ContractConfig.PUSD
 	if pusd == constants.ZERO_ADDRESS {

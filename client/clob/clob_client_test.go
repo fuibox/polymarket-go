@@ -238,11 +238,11 @@ func Test_CreateClobClient(t *testing.T) {
 			fmt.Printf("Closed only mode: %v\n", banStatus.ClosedOnly)
 		}
 
-		trades, err := clobClient.GetTrades(funder, nil, true, "")
+		trades, err := clobClient.GetTrades(funder, nil, "")
 		if err != nil {
 			t.Errorf("failed to get trades: %v", err)
 		} else {
-			fmt.Printf("Found %d trades\n", len(trades))
+			fmt.Printf("Found %d trades\n", len(trades.Data))
 		}
 	}
 
@@ -355,11 +355,11 @@ func Test_CreateClobClientWithTurnkey(t *testing.T) {
 			fmt.Printf("Closed only mode: %v\n", banStatus.ClosedOnly)
 		}
 
-		trades, err := clobClient.GetTrades(addr, nil, true, "")
+		trades, err := clobClient.GetTrades(addr, nil, "")
 		if err != nil {
 			t.Errorf("failed to get trades: %v", err)
 		} else {
-			fmt.Printf("Found %d trades\n", len(trades))
+			fmt.Printf("Found %d trades\n", len(trades.Data))
 		}
 	}
 }
@@ -563,11 +563,11 @@ func TestClobClient_GetTrades(t *testing.T) {
 		t.Errorf("failed to create clobClient: %v", err)
 		return
 	}
-	trades, err := clobClient.GetTrades(turnkeyAccount, nil, true, "")
+	trades, err := clobClient.GetTrades(turnkeyAccount, nil, "")
 	if err != nil {
 		t.Errorf("failed to get trades: %v", err)
 	} else {
-		fmt.Printf("Found %d trades\n", len(trades))
+		fmt.Printf("Found %d trades\n", len(trades.Data))
 		tradesStr, err := sonic.MarshalString(trades)
 		if err != nil {
 			t.Errorf("failed to marshal trades: %v", err)

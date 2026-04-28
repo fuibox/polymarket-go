@@ -42,7 +42,7 @@ func newRelayClient() (*RelayClient, error) {
 		Passphrase: "",
 	}
 	proxyUrl := ""
-	relayClient, err := NewRelayClient(relayerUrl, chainId, s, &builderConfig, &proxyUrl)
+	relayClient, err := NewRelayClient(relayerUrl, chainId, s, &builderConfig, &proxyUrl, nil)
 	if err != nil {
 		return nil, err
 	}
