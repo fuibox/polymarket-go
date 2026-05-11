@@ -24,8 +24,10 @@ type SafeTransaction struct {
 type TransactionType string
 
 const (
-	TransactionTypeSafe       TransactionType = "SAFE"
-	TransactionTypeSafeCreate TransactionType = "SAFE-CREATE"
+	TransactionTypeSafe         TransactionType = "SAFE"
+	TransactionTypeSafeCreate   TransactionType = "SAFE-CREATE"
+	TransactionTypeWallet       TransactionType = "WALLET"
+	TransactionTypeWalletCreate TransactionType = "WALLET-CREATE"
 )
 
 type SignatureParams struct {

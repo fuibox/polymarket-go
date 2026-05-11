@@ -3,9 +3,14 @@
 
 // POLY_1271 (deposit wallet) smoke test — produces a real ERC-7739-wrapped
 // signed V2 order from a Polymarket deposit wallet and (optionally) posts it
-// to the CLOB. Unlike clob_v2_smoke_test.go this test does not deploy or fund
-// the wallet — the wallet must already be live (created via the relayer's
-// WALLET-CREATE flow, with pUSD balance + V2 exchange allowance set).
+// to the CLOB. Unlike clob_v2_smoke_test.go this test does not fund the
+// wallet — funding pUSD remains a manual step the operator runs once.
+//
+// What this test does cover end-to-end (when POLY_DEPOSIT_POST_TO_SERVER=1):
+//   - WALLET-CREATE via the relayer if the wallet isn't yet deployed on-chain
+//   - WALLET batch (approve pUSD to V2 exchanges) if allowance is zero
+//   - CLOB balance/allowance refresh with signature_type=3
+//   - POST a deepest-OOTM LIMIT BUY and cancel it
 //
 // Run:
 //
@@ -37,20 +42,27 @@
 package smoke
 
 import (
+	"context"
 	"encoding/hex"
+	"math/big"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/shopspring/decimal"
 
 	"github.com/fuibox/polymarket-go/client/clob"
 	"github.com/fuibox/polymarket-go/client/clob/clob_types"
 	"github.com/fuibox/polymarket-go/client/clob/order_builder"
+	"github.com/fuibox/polymarket-go/client/config"
 	"github.com/fuibox/polymarket-go/client/constants"
 	"github.com/fuibox/polymarket-go/client/depositwallet"
+	"github.com/fuibox/polymarket-go/client/relayer"
 	"github.com/fuibox/polymarket-go/client/signer"
 	"github.com/fuibox/polymarket-go/client/types"
 	"github.com/fuibox/polymarket-go/tools/headers"
@@ -161,6 +173,28 @@ func TestClobV2_POLY1271(t *testing.T) {
 	if clobHost == "" {
 		clobHost = defaultClobHost
 	}
+	relayerURL := strings.TrimSpace(os.Getenv("POLY_RELAYER_URL"))
+	if relayerURL == "" {
+		relayerURL = defaultRelayerURL
+	}
+	polygonRPC := strings.TrimSpace(os.Getenv("POLY_POLYGON_RPC"))
+	if polygonRPC == "" {
+		polygonRPC = defaultPolygonRPC
+	}
+
+	// --- Stage A: ensure the deposit wallet is deployed on-chain ---
+	relay, err := relayer.NewRelayClient(relayerURL, 137, sig, bc, nil, &polygonRPC)
+	if err != nil {
+		t.Fatalf("new relay client: %v", err)
+	}
+	if err := ensureDepositWalletDeployed(t, relay, polygonRPC, ownerAddr, derived); err != nil {
+		t.Fatalf("ensure wallet deployed: %v", err)
+	}
+
+	// --- Stage B: approve pUSD to V2 exchanges if needed ---
+	if err := ensurePUSDApprovedToV2(t, relay, polygonRPC, ownerAddr, derived); err != nil {
+		t.Fatalf("ensure pUSD approvals: %v", err)
+	}
 
 	clobClient, err := clob.NewClobClient(&clob.ClientConfig{
 		Host:            clobHost,
@@ -198,6 +232,107 @@ func TestClobV2_POLY1271(t *testing.T) {
 			t.Logf("cancelled %s", resp.OrderID)
 		}
 	}
+}
+
+// ensureDepositWalletDeployed checks the wallet's on-chain code; if empty,
+// submits WALLET-CREATE and polls until the relayer transaction is mined.
+func ensureDepositWalletDeployed(t *testing.T, relay *relayer.RelayClient, polygonRPC string, owner, wallet common.Address) error {
+	t.Helper()
+	eth, err := ethclient.Dial(polygonRPC)
+	if err != nil {
+		return err
+	}
+	defer eth.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	code, err := eth.CodeAt(ctx, wallet, nil)
+	if err != nil {
+		return err
+	}
+	if len(code) > 0 {
+		t.Logf("deposit wallet already deployed (%d bytes of code)", len(code))
+		return nil
+	}
+	t.Logf("deposit wallet not deployed — submitting WALLET-CREATE")
+	resp, err := relay.CreateDepositWallet(owner)
+	if err != nil {
+		return err
+	}
+	t.Logf("WALLET-CREATE txID=%s", resp.TransactionID)
+	deployCtx, dCancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer dCancel()
+	tx, err := relay.PollDepositWalletDeploy(deployCtx, resp.TransactionID, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	t.Logf("WALLET-CREATE mined: state=%s txHash=%s", tx.State, tx.TransactionHash)
+	return nil
+}
+
+// ensurePUSDApprovedToV2 checks the deposit wallet's pUSD allowance for
+// ExchangeV2; if zero, submits a WALLET batch that calls pUSD.approve(...)
+// for both ExchangeV2 and NegRiskAdapterV2.
+func ensurePUSDApprovedToV2(t *testing.T, relay *relayer.RelayClient, polygonRPC string, owner, wallet common.Address) error {
+	t.Helper()
+	cc, err := config.GetContractConfig(137)
+	if err != nil {
+		return err
+	}
+	eth, err := ethclient.Dial(polygonRPC)
+	if err != nil {
+		return err
+	}
+	defer eth.Close()
+
+	approveCalldata := func(spender common.Address) []byte {
+		// approve(address,uint256) selector
+		out := make([]byte, 0, 4+32+32)
+		out = append(out, 0x09, 0x5e, 0xa7, 0xb3)
+		out = append(out, common.LeftPadBytes(spender.Bytes(), 32)...)
+		maxUint := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+		out = append(out, common.LeftPadBytes(maxUint.Bytes(), 32)...)
+		return out
+	}
+
+	// Read current allowance(wallet, ExchangeV2) via eth_call: allowance(address,address)
+	allowanceCalldata := append([]byte{0xdd, 0x62, 0xed, 0x3e},
+		append(common.LeftPadBytes(wallet.Bytes(), 32), common.LeftPadBytes(cc.ExchangeV2.Bytes(), 32)...)...)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	raw, err := eth.CallContract(ctx, callMsg(cc.PUSD, allowanceCalldata), nil)
+	if err != nil {
+		return err
+	}
+	currAllowance := new(big.Int).SetBytes(raw)
+	if currAllowance.Sign() > 0 {
+		t.Logf("pUSD allowance to ExchangeV2 already non-zero (%s) — skipping approve", currAllowance.String())
+		return nil
+	}
+	t.Logf("pUSD allowance is zero — submitting WALLET batch with two approve calls")
+
+	calls := []depositwallet.Call{
+		{Target: cc.PUSD, Value: big.NewInt(0), Data: approveCalldata(cc.ExchangeV2)},
+		{Target: cc.PUSD, Value: big.NewInt(0), Data: approveCalldata(cc.NegRiskAdapterV2)},
+	}
+	deadline := uint64(time.Now().Add(15 * time.Minute).Unix())
+	resp, err := relay.ExecuteDepositWalletBatch(owner, wallet, deadline, calls)
+	if err != nil {
+		return err
+	}
+	t.Logf("approve batch txID=%s", resp.TransactionID)
+	pollCtx, pCancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer pCancel()
+	tx, err := relay.PollDepositWalletDeploy(pollCtx, resp.TransactionID, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	t.Logf("approve batch mined: state=%s txHash=%s", tx.State, tx.TransactionHash)
+	return nil
+}
+
+// callMsg builds a read-only eth_call argument with no `from` (any address).
+func callMsg(to common.Address, data []byte) ethereum.CallMsg {
+	return ethereum.CallMsg{To: &to, Data: data}
 }
 
 func assertPOLY1271OrderShape(t *testing.T, signed types.SignedOrderV2, depositWallet common.Address) {
