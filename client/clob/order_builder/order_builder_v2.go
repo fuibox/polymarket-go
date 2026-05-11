@@ -8,6 +8,7 @@ import (
 	"github.com/fuibox/polymarket-go/client/clob/clob_types"
 	"github.com/fuibox/polymarket-go/client/clob/utils_order_builder_v2"
 	"github.com/fuibox/polymarket-go/client/config"
+	"github.com/fuibox/polymarket-go/client/constants"
 	"github.com/fuibox/polymarket-go/client/signer"
 	"github.com/fuibox/polymarket-go/client/types"
 
@@ -65,6 +66,13 @@ func (b *OrderBuilder) CreateOrderV2(signerHandler *signer.Signer, args clob_typ
 	if err != nil {
 		return types.SignedOrderV2{}, err
 	}
+	// POLY_1271: docs require maker == signer == deposit wallet (= b.Funder).
+	// The EOA / Turnkey key is still the on-the-wire signer, but it is
+	// invisible to the order payload — the deposit wallet's ERC-1271 verifier
+	// resolves it from the wrapped signature.
+	if b.SigType == constants.POLY_1271 {
+		signerAddr = b.Funder
+	}
 	data := utils_order_builder_v2.OrderDataV2{
 		Maker:         b.Funder,
 		Signer:        signerAddr,
@@ -96,6 +104,13 @@ func (b *OrderBuilder) CreateMarketOrderV2(signerHandler *signer.Signer, args cl
 	signerAddr, err := resolveSignerAddress(signerHandler, options.TurnkeyAccount)
 	if err != nil {
 		return types.SignedOrderV2{}, err
+	}
+	// POLY_1271: docs require maker == signer == deposit wallet (= b.Funder).
+	// The EOA / Turnkey key is still the on-the-wire signer, but it is
+	// invisible to the order payload — the deposit wallet's ERC-1271 verifier
+	// resolves it from the wrapped signature.
+	if b.SigType == constants.POLY_1271 {
+		signerAddr = b.Funder
 	}
 	data := utils_order_builder_v2.OrderDataV2{
 		Maker:         b.Funder,

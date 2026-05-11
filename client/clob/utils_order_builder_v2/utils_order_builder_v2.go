@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/fuibox/polymarket-go/client/clob/utils"
 	"github.com/fuibox/polymarket-go/client/constants"
+	"github.com/fuibox/polymarket-go/client/depositwallet"
 	"github.com/fuibox/polymarket-go/client/relayer/model/polyEip712"
 	"github.com/fuibox/polymarket-go/client/signer"
 	"github.com/fuibox/polymarket-go/client/types"
@@ -68,7 +69,23 @@ func (b *UtilsOrderBuilderV2) BuildSignedOrder(data OrderDataV2) (types.SignedOr
 	}
 	domainSepHash := common.BytesToHash(domainSep[:])
 
-	digest := order.OrderEIP712Digest(domainSepHash, structHash)
+	// For POLY_1271 the EOA signs an ERC-7739-wrapped digest, not the raw V2
+	// order digest. The wallet's on-chain ERC-1271 verifier reconstructs the
+	// unwrapped digest from the trailer the wire signature carries.
+	var (
+		digest       common.Hash
+		erc7739Trail []byte
+	)
+	if order.SignatureType == uint8(constants.POLY_1271) {
+		digest, erc7739Trail, err = depositwallet.WrapERC7739(
+			structHash, domainSepHash, order.Maker, b.ChainId, orderTypeStringV2,
+		)
+		if err != nil {
+			return types.SignedOrderV2{}, fmt.Errorf("erc7739 wrap: %w", err)
+		}
+	} else {
+		digest = order.OrderEIP712Digest(domainSepHash, structHash)
+	}
 
 	var sig string
 	if b.Signer.SignerType() == signer.Turnkey {
@@ -78,6 +95,20 @@ func (b *UtilsOrderBuilderV2) BuildSignedOrder(data OrderDataV2) (types.SignedOr
 	}
 	if err != nil {
 		return types.SignedOrderV2{}, err
+	}
+
+	if erc7739Trail != nil {
+		// SignHash returns a 0x-prefixed 65-byte ECDSA signature. Concatenate
+		// the ERC-7739 trailer so the wallet's ERC-1271 verifier can validate.
+		ecdsaBytes, decodeErr := hex.DecodeString(strings.TrimPrefix(sig, "0x"))
+		if decodeErr != nil {
+			return types.SignedOrderV2{}, fmt.Errorf("decode ecdsa sig: %w", decodeErr)
+		}
+		wrapped, wrapErr := depositwallet.AssembleWrappedSignature(ecdsaBytes, erc7739Trail)
+		if wrapErr != nil {
+			return types.SignedOrderV2{}, wrapErr
+		}
+		sig = "0x" + hex.EncodeToString(wrapped)
 	}
 
 	side := "BUY"
@@ -114,21 +145,34 @@ func (b *UtilsOrderBuilderV2) buildOrder(data OrderDataV2) (OrderV2, error) {
 	if data.Signer == constants.ZERO_ADDRESS {
 		data.Signer = data.Maker
 	}
-	switch b.Signer.SignerType() {
-	case signer.PrivateKey:
-		signerAddr, err := b.Signer.GetPubkeyOfPrivateKey()
-		if err != nil {
-			return OrderV2{}, err
+	// For POLY_1271, data.Signer is the deposit wallet (not the EOA), so the
+	// usual pubkey-equality check does not apply. The deposit wallet's on-chain
+	// ERC-1271 verifier authenticates the actual EOA via ecrecover. We only
+	// enforce the docs' rule that maker == signer == deposit wallet.
+	if data.SignatureType == constants.POLY_1271 {
+		if data.Maker != data.Signer {
+			return OrderV2{}, errors.New("POLY_1271: maker and signer must both equal the deposit wallet address")
 		}
-		if data.Signer != signerAddr {
-			return OrderV2{}, errors.New("signer does not match data.Signer")
+		if b.Signer.SignerType() != signer.PrivateKey && b.Signer.SignerType() != signer.Turnkey {
+			return OrderV2{}, errors.New("signer type is invalid")
 		}
-	case signer.Turnkey:
-		if data.Signer != b.Option.TurnkeyAccount {
-			return OrderV2{}, errors.New("turnkeyAccount does not match data.Signer")
+	} else {
+		switch b.Signer.SignerType() {
+		case signer.PrivateKey:
+			signerAddr, err := b.Signer.GetPubkeyOfPrivateKey()
+			if err != nil {
+				return OrderV2{}, err
+			}
+			if data.Signer != signerAddr {
+				return OrderV2{}, errors.New("signer does not match data.Signer")
+			}
+		case signer.Turnkey:
+			if data.Signer != b.Option.TurnkeyAccount {
+				return OrderV2{}, errors.New("turnkeyAccount does not match data.Signer")
+			}
+		default:
+			return OrderV2{}, errors.New("signer type is invalid")
 		}
-	default:
-		return OrderV2{}, errors.New("signer type is invalid")
 	}
 
 	tokenId, err := utils.MustBigInt(data.TokenID)
@@ -198,7 +242,7 @@ func (b *UtilsOrderBuilderV2) validateInputs(data OrderDataV2) error {
 		return fmt.Errorf("timestamp is required (unix millis as decimal string)")
 	}
 	switch data.SignatureType {
-	case constants.EOA, constants.POLY_GNOSIS_SAFE, constants.POLY_PROXY:
+	case constants.EOA, constants.POLY_GNOSIS_SAFE, constants.POLY_PROXY, constants.POLY_1271:
 	default:
 		return fmt.Errorf("invalid signatureType")
 	}

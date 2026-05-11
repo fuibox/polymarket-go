@@ -12,6 +12,7 @@ import (
 	"github.com/fuibox/polymarket-go/client/constants"
 	"github.com/fuibox/polymarket-go/client/relayer/model/polyEip712"
 	"github.com/fuibox/polymarket-go/client/signer"
+	"github.com/fuibox/polymarket-go/client/types"
 )
 
 // A fixed, well-known test private key. Test-only; this wallet must NEVER hold funds.
@@ -152,6 +153,125 @@ func TestBuildSignedOrder_SignatureRoundTrip(t *testing.T) {
 	recovered := crypto.PubkeyToAddress(*pub)
 	if recovered != addr {
 		t.Fatalf("recovered signer = %s, want %s", recovered.Hex(), addr.Hex())
+	}
+}
+
+// TestBuildSignedOrder_POLY1271 covers the deposit-wallet path: signature
+// length should exceed 65 bytes (ECDSA + ERC-7739 trailer), and the trailer's
+// reconstructed digest must equal the unwrapped V2 EIP-712 digest — which is
+// what the wallet's on-chain isValidSignature checks before unwrapping.
+func TestBuildSignedOrder_POLY1271(t *testing.T) {
+	priv, err := crypto.HexToECDSA(testPrivHex)
+	if err != nil {
+		t.Fatalf("parse key: %v", err)
+	}
+	eoa := crypto.PubkeyToAddress(priv.PublicKey)
+	depositWallet := common.HexToAddress("0xC493511524780Be2B6A26b357187524E5deE6013")
+
+	signerHandler, err := signer.NewSigner(signer.SignerConfig{
+		SignerType:       signer.PrivateKey,
+		ChainID:          137,
+		PrivateKeyConfig: &signer.PrivateKeyClient{PrivateKey: priv, Address: eoa},
+	})
+	if err != nil {
+		t.Fatalf("new signer: %v", err)
+	}
+
+	b, err := NewUtilsOrderBuilderV2(common.HexToAddress(testV2ExchangeHex), 137, signerHandler, Option{})
+	if err != nil {
+		t.Fatalf("new builder: %v", err)
+	}
+
+	data := OrderDataV2{
+		Maker:         depositWallet,
+		Signer:        depositWallet,
+		TokenID:       "123456789012345678901234567890",
+		MakerAmount:   "1146000",
+		TakerAmount:   "6000000",
+		Side:          0,
+		SignatureType: constants.POLY_1271,
+		Timestamp:     "1713398400000",
+		Metadata:      "0x0000000000000000000000000000000000000000000000000000000000000000",
+		Builder:       "0x0000000000000000000000000000000000000000000000000000000000000000",
+	}
+
+	signed, err := b.BuildSignedOrder(data)
+	if err != nil {
+		t.Fatalf("BuildSignedOrder: %v", err)
+	}
+
+	if signed.SignatureType != types.SignatureType(constants.POLY_1271) {
+		t.Errorf("SignatureType: want %d, got %d", constants.POLY_1271, signed.SignatureType)
+	}
+	if signed.Maker != depositWallet.Hex() || signed.Signer != depositWallet.Hex() {
+		t.Errorf("maker/signer must both equal deposit wallet")
+	}
+
+	sigBytes, err := hex.DecodeString(strings.TrimPrefix(signed.Signature, "0x"))
+	if err != nil {
+		t.Fatalf("decode sig: %v", err)
+	}
+	// Expected layout: 65 (ECDSA) + 32 (appDomainSep) + 32 (contents) + len(contentsType) + 2 (uint16)
+	wantLen := 65 + 32 + 32 + len(orderTypeStringV2) + 2
+	if len(sigBytes) != wantLen {
+		t.Fatalf("wrapped sig length = %d, want %d", len(sigBytes), wantLen)
+	}
+
+	// Trailer bytes start at offset 65. Reconstruct the unwrapped V2 digest and
+	// confirm it matches keccak256("\x19\x01" || trailer[0..64]).
+	trailer := sigBytes[65:]
+	walletReconstructed := crypto.Keccak256Hash(append([]byte{0x19, 0x01}, trailer[:64]...))
+
+	order, err := b.buildOrder(data)
+	if err != nil {
+		t.Fatalf("buildOrder: %v", err)
+	}
+	order.Salt = big.NewInt(signed.Salt)
+	structHash, err := order.OrderStructHash()
+	if err != nil {
+		t.Fatalf("struct hash: %v", err)
+	}
+	name := "Polymarket CTF Exchange"
+	version := "2"
+	chainId := 137
+	contract := testV2ExchangeHex
+	dom := polyEip712.MakeDomain(&name, &version, &chainId, &contract, nil)
+	dsep, err := dom.HashStruct()
+	if err != nil {
+		t.Fatalf("domain hash: %v", err)
+	}
+	exchangeDigest := order.OrderEIP712Digest(common.BytesToHash(dsep[:]), structHash)
+
+	if walletReconstructed != exchangeDigest {
+		t.Fatalf("trailer reconstruction != unwrapped exchange digest:\n  wallet=%s\n  exch  =%s",
+			walletReconstructed.Hex(), exchangeDigest.Hex())
+	}
+}
+
+// TestBuildSignedOrder_POLY1271_RejectsMismatchedMakerSigner enforces the
+// docs' constraint at the SDK boundary.
+func TestBuildSignedOrder_POLY1271_RejectsMismatchedMakerSigner(t *testing.T) {
+	priv, _ := crypto.HexToECDSA(testPrivHex)
+	signerHandler, _ := signer.NewSigner(signer.SignerConfig{
+		SignerType:       signer.PrivateKey,
+		ChainID:          137,
+		PrivateKeyConfig: &signer.PrivateKeyClient{PrivateKey: priv, Address: crypto.PubkeyToAddress(priv.PublicKey)},
+	})
+	b, _ := NewUtilsOrderBuilderV2(common.HexToAddress(testV2ExchangeHex), 137, signerHandler, Option{})
+
+	data := OrderDataV2{
+		Maker:         common.HexToAddress("0xC493511524780Be2B6A26b357187524E5deE6013"),
+		Signer:        common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),
+		TokenID:       "1",
+		MakerAmount:   "1",
+		TakerAmount:   "1",
+		Side:          0,
+		SignatureType: constants.POLY_1271,
+		Timestamp:     "1713398400000",
+	}
+	_, err := b.BuildSignedOrder(data)
+	if err == nil || !strings.Contains(err.Error(), "maker and signer must both equal") {
+		t.Fatalf("want maker/signer mismatch error, got %v", err)
 	}
 }
 

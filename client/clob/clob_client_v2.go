@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/bytedance/sonic"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/fuibox/polymarket-go/client/clob/clob_types"
 	"github.com/fuibox/polymarket-go/client/clob/order_builder"
 	"github.com/fuibox/polymarket-go/client/constants"
@@ -41,11 +42,38 @@ func (c *ClobClient) createOrderV2(args clob_types.OrderArgs, option clob_types.
 	if args.BuilderCode == "" {
 		args.BuilderCode = c.defaultBuilderCode
 	}
-	ob, err := order_builder.NewOrderBuilder(c.signer, constants.POLY_GNOSIS_SAFE, option.SafeAccount)
+	sigType, funder, err := resolveV2SigTypeAndFunder(option)
+	if err != nil {
+		return types.SignedOrderV2{}, err
+	}
+	ob, err := order_builder.NewOrderBuilder(c.signer, sigType, funder)
 	if err != nil {
 		return types.SignedOrderV2{}, err
 	}
 	return ob.CreateOrderV2(c.signer, args, option)
+}
+
+// resolveV2SigTypeAndFunder selects between POLY_GNOSIS_SAFE (default) and
+// POLY_1271 (deposit wallet) based on the order option. Maker/funder must
+// match the signature type's expected address: SafeAccount for Safe orders,
+// DepositWallet for POLY_1271.
+func resolveV2SigTypeAndFunder(option clob_types.PartialCreateOrderOptions) (constants.SigType, common.Address, error) {
+	if option.SignatureType == nil {
+		return constants.POLY_GNOSIS_SAFE, option.SafeAccount, nil
+	}
+	switch *option.SignatureType {
+	case constants.POLY_1271:
+		if option.DepositWallet == (common.Address{}) {
+			return 0, common.Address{}, fmt.Errorf("POLY_1271: option.DepositWallet is required")
+		}
+		return constants.POLY_1271, option.DepositWallet, nil
+	case constants.POLY_GNOSIS_SAFE:
+		return constants.POLY_GNOSIS_SAFE, option.SafeAccount, nil
+	case constants.POLY_PROXY, constants.EOA:
+		return *option.SignatureType, option.SafeAccount, nil
+	default:
+		return 0, common.Address{}, fmt.Errorf("unsupported V2 SignatureType: %d", *option.SignatureType)
+	}
 }
 
 // createMarketOrderV2 is the market-order equivalent of createOrderV2.
@@ -76,7 +104,11 @@ func (c *ClobClient) createMarketOrderV2(args clob_types.MarketOrderArgs, option
 	if args.BuilderCode == "" {
 		args.BuilderCode = c.defaultBuilderCode
 	}
-	ob, err := order_builder.NewOrderBuilder(c.signer, constants.POLY_GNOSIS_SAFE, option.SafeAccount)
+	sigType, funder, err := resolveV2SigTypeAndFunder(option)
+	if err != nil {
+		return types.SignedOrderV2{}, err
+	}
+	ob, err := order_builder.NewOrderBuilder(c.signer, sigType, funder)
 	if err != nil {
 		return types.SignedOrderV2{}, err
 	}

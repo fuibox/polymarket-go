@@ -32,6 +32,13 @@ type ContractConfig struct {
 	// "not enough balance / allowance" if not approved. Value reused from
 	// v1's NEGRISK_ADAPTER (same address).
 	NegRiskAdapterV2 common.Address
+
+	// Deposit wallet contracts (POLY_1271 signature type, V2 only). The
+	// factory is a UUPS proxy; the implementation is the ERC-1967 minimal
+	// proxy template that every deposit wallet clones. Amoy not yet
+	// published — zero on testnet.
+	DepositWalletFactory        common.Address
+	DepositWalletImplementation common.Address
 }
 
 var contractConfigs = map[types.Chain]ContractConfig{
@@ -50,6 +57,12 @@ var contractConfigs = map[types.Chain]ContractConfig{
 		PUSD:             common.HexToAddress("0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"),
 		CollateralOnramp: common.HexToAddress("0x93070a847efEf7F70739046A929D47a521F5B8ee"),
 		NegRiskAdapterV2: common.HexToAddress("0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"),
+
+		// Deposit wallet implementation address read on-chain from
+		// factory.implementation() (selector 0x5c60da1b) and confirmed against
+		// the deployed wallet at 0xC493...6013 (id() == bytes32(owner)).
+		DepositWalletFactory:        common.HexToAddress("0x00000000000Fb5C9ADea0298D729A0CB3823Cc07"),
+		DepositWalletImplementation: common.HexToAddress("0x58CA52ebe0DadfdF531Cde7062e76746de4Db1eB"),
 	},
 	80002: {
 		SafeFactory:          common.HexToAddress("0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"),

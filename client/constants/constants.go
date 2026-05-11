@@ -39,4 +39,8 @@ const (
 	POLY_PROXY
 	// POLY_GNOSIS_SAFE EIP712 signatures signed by EOAs that own Polymarket Gnosis safes
 	POLY_GNOSIS_SAFE
+	// POLY_1271 ERC-7739-wrapped EIP712 signatures verified via ERC-1271 on a
+	// Polymarket deposit wallet. V2 orders only; maker and signer must both be
+	// the deposit wallet address. See client/depositwallet for the wrapper.
+	POLY_1271
 )

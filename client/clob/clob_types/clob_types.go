@@ -3,6 +3,7 @@ package clob_types
 import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/shopspring/decimal"
+	"github.com/fuibox/polymarket-go/client/constants"
 	"github.com/fuibox/polymarket-go/client/types"
 )
 
@@ -42,6 +43,14 @@ type PartialCreateOrderOptions struct {
 	NegRisk        *bool           `json:"negRisk"`
 	TurnkeyAccount common.Address  `json:"turnkeyAccount"`
 	SafeAccount    common.Address  `json:"safeAccount"`
+
+	// SignatureType + DepositWallet are V2-only opt-ins for the POLY_1271
+	// (deposit wallet) signature path. When SignatureType is nil the V2
+	// pipeline defaults to POLY_GNOSIS_SAFE with SafeAccount as the funder.
+	// When SignatureType points to constants.POLY_1271, DepositWallet must
+	// be set to the deposit wallet address (maker == signer == this address).
+	SignatureType *constants.SigType `json:"signatureType,omitempty"`
+	DepositWallet common.Address     `json:"depositWallet,omitempty"`
 }
 
 type ClobOption struct {
