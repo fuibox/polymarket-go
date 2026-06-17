@@ -34,3 +34,5 @@ smoke/.wallet.*.json
 # Editor/IDE
 # .idea/
 # .vscode/
+docs/taskbook
+docs/_workspace_notes
