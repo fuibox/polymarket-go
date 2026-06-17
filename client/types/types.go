@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -262,6 +263,44 @@ type MakerOrder struct {
 type TradesResponse struct {
 	Data       []Trade `json:"data"`
 	NextCursor string  `json:"next_cursor"`
+}
+
+// BuilderTradesResponse is a single page of builder trades from /builder/trades.
+//
+// Trades holds the trade array. The production REST endpoint returns it under
+// the "data" key (confirmed by POC), while the CLOB client SDK docs label it
+// "trades"; UnmarshalJSON reads either key into Trades so the SDK is immune to
+// that documented discrepancy and any future drift.
+type BuilderTradesResponse struct {
+	Trades     []BuilderTrade
+	NextCursor string
+	Limit      int
+	Count      int
+}
+
+// UnmarshalJSON populates BuilderTradesResponse, accepting the trade array under
+// either "data" (the real wire key) or "trades" (forward-compatible alias). If
+// both are present, "data" wins.
+func (r *BuilderTradesResponse) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		Data       []BuilderTrade `json:"data"`
+		Trades     []BuilderTrade `json:"trades"`
+		NextCursor string         `json:"next_cursor"`
+		Limit      int            `json:"limit"`
+		Count      int            `json:"count"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	if raw.Data != nil {
+		r.Trades = raw.Data
+	} else {
+		r.Trades = raw.Trades
+	}
+	r.NextCursor = raw.NextCursor
+	r.Limit = raw.Limit
+	r.Count = raw.Count
+	return nil
 }
 
 type Trade struct {
@@ -530,21 +569,32 @@ type UserRewardsEarning struct {
 }
 
 type BuilderTrade struct {
-	ID              string     `json:"id"`
-	TradeType       string     `json:"tradeType"`
-	TakerOrderHash  string     `json:"takerOrderHash"`
-	Builder         string     `json:"builder"`
-	Market          string     `json:"market"`
-	AssetID         string     `json:"assetId"`
-	Side            string     `json:"side"`
-	Size            string     `json:"size"`
-	SizeUSDC        string     `json:"sizeUsdc"`
-	Price           string     `json:"price"`
-	Status          string     `json:"status"`
-	Outcome         string     `json:"outcome"`
-	OutcomeIndex    int        `json:"outcomeIndex"`
-	Owner           string     `json:"owner"`
-	Maker           string     `json:"maker"`
+	ID             string `json:"id"`
+	TradeType      string `json:"tradeType"`
+	TakerOrderHash string `json:"takerOrderHash"`
+	Builder        string `json:"builder"`
+	Market         string `json:"market"`
+	AssetID        string `json:"assetId"`
+	Side           string `json:"side"`
+	Size           string `json:"size"`
+	SizeUSDC       string `json:"sizeUsdc"`
+	Price          string `json:"price"`
+	// Status carries the trade lifecycle state. The wire values are prefixed
+	// with TRADE_STATUS_ (e.g. TRADE_STATUS_CONFIRMED, not CONFIRMED) — compare
+	// against the TradeStatus* constants below, never bare "CONFIRMED".
+	Status       string `json:"status"`
+	Outcome      string `json:"outcome"`
+	OutcomeIndex int    `json:"outcomeIndex"`
+	Owner        string `json:"owner"`
+	Maker        string `json:"maker"`
+	// BuilderCode is the order-level builder attribution code; it matches the
+	// builder_code query parameter used to fetch the trade.
+	BuilderCode string `json:"builderCode"`
+	// BuilderFee is the builder-side fee for this trade. Semantics of
+	// Fee / FeeUSDC / BuilderFee (which one represents "our side's earned
+	// amount") are left to the downstream reconciliation caller — the SDK
+	// passes all three through verbatim and does not decide on the caller's behalf.
+	BuilderFee      string     `json:"builderFee"`
 	TransactionHash string     `json:"transactionHash"`
 	MatchTime       string     `json:"matchTime"`
 	BucketIndex     int        `json:"bucketIndex"`
@@ -554,6 +604,19 @@ type BuilderTrade struct {
 	CreatedAt       *time.Time `json:"createdAt,omitempty"`
 	UpdatedAt       *time.Time `json:"updatedAt,omitempty"`
 }
+
+// Builder trade status values. The /builder/trades endpoint returns status
+// strings prefixed with TRADE_STATUS_ (confirmed by production POC). Downstream
+// gating must compare against these constants, not the bare "CONFIRMED" /
+// "MATCHED" / "FAILED" values from the order-lifecycle docs — a bare comparison
+// never matches the real wire value.
+const (
+	TradeStatusConfirmed = "TRADE_STATUS_CONFIRMED" // observed in POC
+	TradeStatusMatched   = "TRADE_STATUS_MATCHED"   // observed in POC
+	TradeStatusFailed    = "TRADE_STATUS_FAILED"    // observed in POC
+	TradeStatusMined     = "TRADE_STATUS_MINED"     // from lifecycle docs, not observed in POC (inferred)
+	TradeStatusRetrying  = "TRADE_STATUS_RETRYING"  // from lifecycle docs, not observed in POC (inferred)
+)
 
 type OrderData struct {
 	Maker         string

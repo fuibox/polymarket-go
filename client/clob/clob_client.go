@@ -601,6 +601,86 @@ func (c *ClobClient) GetAllTrades(funder common.Address, params *types.TradePara
 	return allTrades, nil
 }
 
+// GetBuilderTrades gets a single page of builder trades attributed to the given
+// builderCode, with pagination support. Mirrors GetTrades; the endpoint is
+// public, but L2 headers are sent for parity with GetTrades and are harmless.
+func (c *ClobClient) GetBuilderTrades(funder common.Address, builderCode string, params *types.TradeParams, nextCursor string) (*types.BuilderTradesResponse, error) {
+	if c.creds == nil {
+		return nil, fmt.Errorf("API credentials are required")
+	}
+	if builderCode == "" {
+		return nil, fmt.Errorf("builderCode is required")
+	}
+
+	headerArgs := &types.L2HeaderArgs{
+		Method:      "GET",
+		RequestPath: endpoint.GetBuilderTrades,
+	}
+
+	headers, err := c.createL2Headers(funder, headerArgs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create L2 headers: %w", err)
+	}
+
+	queryParams := url.Values{}
+	if nextCursor == "" {
+		nextCursor = types.INITIAL_CURSOR
+	}
+	queryParams.Add("next_cursor", nextCursor)
+	queryParams.Add("builder_code", builderCode)
+
+	if params != nil {
+		if params.ID != nil {
+			queryParams.Add("id", *params.ID)
+		}
+		if params.MakerAddress != nil {
+			queryParams.Add("maker_address", *params.MakerAddress)
+		}
+		if params.Market != nil {
+			queryParams.Add("market", *params.Market)
+		}
+		if params.AssetID != nil {
+			queryParams.Add("asset_id", *params.AssetID)
+		}
+		if params.Before != nil {
+			queryParams.Add("before", *params.Before)
+		}
+		if params.After != nil {
+			queryParams.Add("after", *params.After)
+		}
+	}
+
+	var result types.BuilderTradesResponse
+	err = c.getJSONWithHeadersAndParams(endpoint.GetBuilderTrades, headers, queryParams, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+// GetAllBuilderTrades gets all builder trades for builderCode by iterating
+// through all pages. Mirrors GetAllTrades.
+func (c *ClobClient) GetAllBuilderTrades(funder common.Address, builderCode string, params *types.TradeParams) ([]types.BuilderTrade, error) {
+	var allTrades []types.BuilderTrade
+	nextCursor := ""
+
+	for {
+		resp, err := c.GetBuilderTrades(funder, builderCode, params, nextCursor)
+		if err != nil {
+			return allTrades, err
+		}
+		allTrades = append(allTrades, resp.Trades...)
+
+		if resp.NextCursor == types.END_CURSOR || resp.NextCursor == "" {
+			break
+		}
+		nextCursor = resp.NextCursor
+	}
+
+	return allTrades, nil
+}
+
 // Helper methods for HTTP requests
 
 func (c *ClobClient) get(endpoint string) (interface{}, error) {
