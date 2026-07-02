@@ -74,6 +74,15 @@ func adjustToDecimalPlaces(v decimal.Decimal, maxPlaces int) decimal.Decimal {
 	return v
 }
 
+// roundPriceToTick snaps price to the config's tick grid; falls back to
+// legacy decimal-place rounding for RoundConfig values without Tick.
+func roundPriceToTick(price decimal.Decimal, rc types.RoundConfig) decimal.Decimal {
+	if rc.Tick.IsZero() {
+		return utils.RoundNormal(price, rc.Price)
+	}
+	return utils.RoundToTick(price, rc.Tick)
+}
+
 // buildSignedOrder resolves the contract addresses and delegates to UtilsOrderBuilder.
 func (b *OrderBuilder) buildSignedOrder(
 	signerHandler *signer.Signer,
@@ -160,7 +169,7 @@ func (b *OrderBuilder) GetOrderAmounts(
 	roundConfig types.RoundConfig,
 ) (sideInt int, makerAmount string, takerAmount string, err error) {
 
-	roundedPrice := utils.RoundNormal(price, roundConfig.Price)
+	roundedPrice := roundPriceToTick(price, roundConfig)
 
 	switch side {
 	case types.SideBuy:
@@ -184,7 +193,7 @@ func (b *OrderBuilder) GetMarketOrderAmounts(
 	roundConfig types.RoundConfig,
 ) (sideInt int, makerAmount string, takerAmount string, err error) {
 
-	roundedPrice := utils.RoundNormal(price, roundConfig.Price)
+	roundedPrice := roundPriceToTick(price, roundConfig)
 
 	switch side {
 	case types.SideBuy:
