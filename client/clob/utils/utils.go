@@ -22,6 +22,12 @@ func RoundUp(x decimal.Decimal, sigDigits int) decimal.Decimal {
 	return x.Mul(multiplier).Ceil().Div(multiplier)
 }
 
+// RoundToTick rounds x to the nearest integer multiple of tick
+// (midpoints round half away from zero, matching decimal.Round).
+func RoundToTick(x decimal.Decimal, tick decimal.Decimal) decimal.Decimal {
+	return x.Div(tick).Round(0).Mul(tick)
+}
+
 func DecimalPlaces(x decimal.Decimal) int {
 	exp := x.Exponent()
 	if exp >= 0 {
