@@ -433,13 +433,15 @@ const (
 	TickSize001   TickSize = "0.01"
 	TickSize0001  TickSize = "0.001"
 	TickSize00001 TickSize = "0.0001"
+	TickSize00025 TickSize = "0.0025"
 )
 
 var RoundingConfig = map[TickSize]RoundConfig{
-	TickSize01:    {Price: 1, Size: 2, Amount: 3},
-	TickSize001:   {Price: 2, Size: 2, Amount: 4},
-	TickSize0001:  {Price: 3, Size: 2, Amount: 5},
-	TickSize00001: {Price: 4, Size: 2, Amount: 6},
+	TickSize01:    {Price: 1, Size: 2, Amount: 3, Tick: decimal.New(1, -1)},
+	TickSize001:   {Price: 2, Size: 2, Amount: 4, Tick: decimal.New(1, -2)},
+	TickSize0001:  {Price: 3, Size: 2, Amount: 5, Tick: decimal.New(1, -3)},
+	TickSize00001: {Price: 4, Size: 2, Amount: 6, Tick: decimal.New(1, -4)},
+	TickSize00025: {Price: 4, Size: 2, Amount: 6, Tick: decimal.New(25, -4)},
 }
 
 // RoundConfig represents rounding configuration
@@ -447,6 +449,9 @@ type RoundConfig struct {
 	Price  int `json:"price"`
 	Size   int `json:"size"`
 	Amount int `json:"amount"`
+	// Tick is the price grid step; prices are rounded to integer multiples of it.
+	// Zero value means legacy decimal-place rounding by Price.
+	Tick decimal.Decimal `json:"tick"`
 }
 
 func GetRoundConfig(tickSize TickSize) *RoundConfig {
