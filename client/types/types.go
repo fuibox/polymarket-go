@@ -202,6 +202,7 @@ type OrderResponse struct {
 	Success            bool     `json:"success"`
 	ErrorMsg           string   `json:"errorMsg"`
 	OrderID            string   `json:"orderID"`
+	TradeIDs           []string `json:"tradeIDs,omitempty"`
 	TransactionsHashes []string `json:"transactionsHashes"`
 	Status             string   `json:"status"`
 	TakingAmount       string   `json:"takingAmount"`

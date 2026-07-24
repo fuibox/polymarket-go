@@ -2,6 +2,7 @@ package clob
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -115,8 +116,12 @@ func (c *ClobClient) GetOK() (interface{}, error) {
 }
 
 func (c *ClobClient) GetServerTime() (int64, error) {
+	return c.getServerTimeWithContext(context.Background())
+}
+
+func (c *ClobClient) getServerTimeWithContext(ctx context.Context) (int64, error) {
 	var result int64
-	err := c.getJSON(endpoint.Time, &result)
+	err := c.getJSONWithHeadersAndParamsContext(ctx, endpoint.Time, nil, url.Values{}, &result)
 
 	return result, err
 }
@@ -530,6 +535,10 @@ func (c *ClobClient) GetOrder(funder common.Address, orderID string) (*types.Ope
 
 // GetTrades gets a single page of trades with pagination support
 func (c *ClobClient) GetTrades(funder common.Address, params *types.TradeParams, nextCursor string) (*types.TradesResponse, error) {
+	return c.getTradesWithContext(context.Background(), funder, params, nextCursor)
+}
+
+func (c *ClobClient) getTradesWithContext(ctx context.Context, funder common.Address, params *types.TradeParams, nextCursor string) (*types.TradesResponse, error) {
 	if c.creds == nil {
 		return nil, fmt.Errorf("API credentials are required")
 	}
@@ -539,7 +548,7 @@ func (c *ClobClient) GetTrades(funder common.Address, params *types.TradeParams,
 		RequestPath: endpoint.GetTrades,
 	}
 
-	headers, err := c.createL2Headers(funder, headerArgs)
+	headers, err := c.createL2HeadersWithContext(ctx, funder, headerArgs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create L2 headers: %w", err)
 	}
@@ -572,12 +581,115 @@ func (c *ClobClient) GetTrades(funder common.Address, params *types.TradeParams,
 	}
 
 	var result types.TradesResponse
-	err = c.getJSONWithHeadersAndParams(endpoint.GetTrades, headers, queryParams, &result)
+	err = c.getJSONWithHeadersAndParamsContext(ctx, endpoint.GetTrades, headers, queryParams, &result)
 	if err != nil {
 		return nil, err
 	}
 
 	return &result, nil
+}
+
+const (
+	orderResolutionTimeout      = 30 * time.Second
+	orderResolutionPollInterval = 250 * time.Millisecond
+	failedTradeStatus           = "FAILED"
+)
+
+// resolveOrderResponse fills the legacy transactionsHashes field from the
+// tradeIDs returned by asynchronous order execution. Resolution is deliberately
+// best-effort: an order accepted by the CLOB remains successful if trade lookup
+// fails or exceeds the deadline.
+func (c *ClobClient) resolveOrderResponse(ctx context.Context, funder common.Address, response *types.OrderResponse) {
+	if response == nil || !response.Success || len(response.TransactionsHashes) > 0 || len(response.TradeIDs) == 0 {
+		return
+	}
+
+	tradeIDs := make([]string, 0, len(response.TradeIDs))
+	seenTradeIDs := make(map[string]struct{}, len(response.TradeIDs))
+	for _, rawID := range response.TradeIDs {
+		tradeID := strings.TrimSpace(rawID)
+		if tradeID == "" {
+			continue
+		}
+		if _, exists := seenTradeIDs[tradeID]; exists {
+			continue
+		}
+		seenTradeIDs[tradeID] = struct{}{}
+		tradeIDs = append(tradeIDs, tradeID)
+	}
+	if len(tradeIDs) == 0 {
+		return
+	}
+
+	resolved := make(map[string]types.Trade, len(tradeIDs))
+	type lookupResult struct {
+		tradeID string
+		trade   types.Trade
+		ok      bool
+	}
+	results := make(chan lookupResult, len(tradeIDs))
+	for _, tradeID := range tradeIDs {
+		go func(id string) {
+			trade, ok := c.waitForTradeResolution(ctx, funder, id)
+			results <- lookupResult{tradeID: id, trade: trade, ok: ok}
+		}(tradeID)
+	}
+	for range tradeIDs {
+		result := <-results
+		if result.ok {
+			resolved[result.tradeID] = result.trade
+		}
+	}
+
+	seenHashes := make(map[string]struct{}, len(resolved))
+	for _, tradeID := range tradeIDs {
+		trade := resolved[tradeID]
+		if isFailedTradeStatus(trade.Status) {
+			continue
+		}
+		hash := strings.TrimSpace(trade.TransactionHash)
+		if hash == "" {
+			continue
+		}
+		if _, exists := seenHashes[hash]; exists {
+			continue
+		}
+		seenHashes[hash] = struct{}{}
+		response.TransactionsHashes = append(response.TransactionsHashes, hash)
+	}
+}
+
+func (c *ClobClient) waitForTradeResolution(ctx context.Context, funder common.Address, tradeID string) (types.Trade, bool) {
+	for {
+		if ctx.Err() != nil {
+			return types.Trade{}, false
+		}
+
+		lookupID := tradeID
+		trades, err := c.getTradesWithContext(ctx, funder, &types.TradeParams{ID: &lookupID}, "")
+		if err == nil {
+			for _, trade := range trades.Data {
+				if trade.ID != tradeID {
+					continue
+				}
+				if strings.TrimSpace(trade.TransactionHash) != "" || isFailedTradeStatus(trade.Status) {
+					return trade, true
+				}
+			}
+		}
+
+		timer := time.NewTimer(orderResolutionPollInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return types.Trade{}, false
+		case <-timer.C:
+		}
+	}
+}
+
+func isFailedTradeStatus(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), failedTradeStatus)
 }
 
 // GetAllTrades gets all trades by iterating through all pages
@@ -739,12 +851,16 @@ func (c *ClobClient) getJSONWithHeaders(endpoint string, headers interface{}, re
 }
 
 func (c *ClobClient) getJSONWithHeadersAndParams(endpoint string, headers interface{}, params url.Values, result interface{}) error {
+	return c.getJSONWithHeadersAndParamsContext(context.Background(), endpoint, headers, params, result)
+}
+
+func (c *ClobClient) getJSONWithHeadersAndParamsContext(ctx context.Context, endpoint string, headers interface{}, params url.Values, result interface{}) error {
 	fullURL := c.host + endpoint
 	if len(params) > 0 {
 		fullURL += "?" + params.Encode()
 	}
 
-	req, err := http.NewRequest("GET", fullURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -783,7 +899,7 @@ type ErrResp struct {
 	Error string `json:"error"`
 }
 
-func (c *ClobClient) postJSONWithHeaders(endpoint string, headers interface{}, data interface{}, result interface{}) error {
+func (c *ClobClient) postJSONWithHeaders(endpointPath string, headers interface{}, data interface{}, result interface{}) error {
 	var bodyReader io.Reader
 	if data != nil {
 		switch v := data.(type) {
@@ -802,7 +918,7 @@ func (c *ClobClient) postJSONWithHeaders(endpoint string, headers interface{}, d
 		}
 	}
 
-	req, err := http.NewRequest("POST", c.host+endpoint, bodyReader)
+	req, err := http.NewRequest("POST", c.host+endpointPath, bodyReader)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -847,6 +963,15 @@ func (c *ClobClient) postJSONWithHeaders(endpoint string, headers interface{}, d
 		err = sonic.Unmarshal(body, result)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal response: %w, body: %s", err, string(body))
+		}
+		if endpointPath == endpoint.PostOrder {
+			orderResponse, ok := result.(*types.OrderResponse)
+			polyAddress := req.Header.Get("POLY_ADDRESS")
+			if ok && common.IsHexAddress(polyAddress) {
+				ctx, cancel := context.WithTimeout(context.Background(), orderResolutionTimeout)
+				c.resolveOrderResponse(ctx, common.HexToAddress(polyAddress), orderResponse)
+				cancel()
+			}
 		}
 		return nil
 	}
@@ -906,6 +1031,10 @@ func (c *ClobClient) deleteWithHeaders(endpoint string, headers interface{}, dat
 }
 
 func (c *ClobClient) createL2Headers(addr common.Address, args *types.L2HeaderArgs) (interface{}, error) {
+	return c.createL2HeadersWithContext(context.Background(), addr, args)
+}
+
+func (c *ClobClient) createL2HeadersWithContext(ctx context.Context, addr common.Address, args *types.L2HeaderArgs) (interface{}, error) {
 	if c.signer == nil {
 		return nil, fmt.Errorf("signer is required for authenticated requests")
 	}
@@ -913,7 +1042,7 @@ func (c *ClobClient) createL2Headers(addr common.Address, args *types.L2HeaderAr
 	var timestamp *int64
 	var tsStr string
 	if c.useServerTime {
-		serverTime, err := c.GetServerTime()
+		serverTime, err := c.getServerTimeWithContext(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get server time: %w", err)
 		}
