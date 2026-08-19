@@ -53,9 +53,10 @@ type CreateWithdrawAddressRequest struct {
 type CreateWithdrawAddressResponse struct {
 	// Address 根据链类型返回对应的提现地址
 	Address struct {
-		EVM string `json:"evm"` // EVM 链提现地址
-		SVM string `json:"svm"` // Solana 提现地址
-		BTC string `json:"btc"` // Bitcoin 提现地址
+		EVM  string `json:"evm"`  // EVM 链提现地址
+		SVM  string `json:"svm"`  // Solana 提现地址
+		BTC  string `json:"btc"`  // Bitcoin 提现地址
+		Tron string `json:"tron"` // Tron 提现地址
 	} `json:"address"`
 
 	// Note 附加说明（如有）
@@ -138,6 +139,10 @@ func (c *BridgeClient) CreateWithdrawAddress(
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
+	// 可选 builder 归因;未配置时不发送(安全降级,请求仍成功)
+	if c.builderCode != "" {
+		httpReq.Header.Set(headerBuilderCode, c.builderCode)
+	}
 
 	// 发送请求
 	resp, err := c.httpClient.Do(httpReq)

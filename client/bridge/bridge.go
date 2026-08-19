@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -16,16 +17,29 @@ import (
 
 const defaultBridgeBaseURL = "https://bridge.polymarket.com"
 
+// headerBuilderCode is the optional attribution header accepted by
+// POST /deposit and POST /withdraw only — /quote, /status and
+// /supported-assets do not take it.
+const headerBuilderCode = "X-Builder-Code"
+
 // BridgeClient represents Polymarket Bridge client
 type BridgeClient struct {
-	host       string
-	httpClient *http.Client
+	host        string
+	httpClient  *http.Client
+	builderCode string // normalized 0x + 64 lowercase hex, or "" when unset
 }
 
 type ClientConfig struct {
 	Host     string
 	Timeout  time.Duration
 	ProxyUrl string
+
+	// BuilderCode 可选。bytes32 hex(0x + 64 位 hex,也接受不带 0x 前缀),
+	// 非空时随 POST /deposit、POST /withdraw 发送 X-Builder-Code header,
+	// 用于把请求归因到你的集成(卡单追溯/优先处理)。
+	// 留空则不发送该 header(服务端返回 missing_builder_code 警告,请求仍成功)。
+	// 领取地址: https://polymarket.com/settings?tab=builder
+	BuilderCode string
 }
 
 // NewBridgeClient creates a BridgeClient with optional proxy and timeout.
@@ -43,8 +57,18 @@ func NewBridgeClient(cfg *ClientConfig) (*BridgeClient, error) {
 		timeout = cfg.Timeout
 	}
 
+	builderCode := ""
+	if cfg != nil {
+		var err error
+		builderCode, err = normalizeBuilderCode(cfg.BuilderCode)
+		if err != nil {
+			return nil, fmt.Errorf("invalid builder code: %w", err)
+		}
+	}
+
 	c := &BridgeClient{
-		host: host,
+		host:        host,
+		builderCode: builderCode,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -63,11 +87,39 @@ func NewBridgeClient(cfg *ClientConfig) (*BridgeClient, error) {
 	return c, nil
 }
 
+// normalizeBuilderCode accepts "" (→ "", header omitted), or a 0x-prefixed /
+// bare hex string of exactly 32 bytes. Shorter inputs are NOT padded — same
+// semantics as the CLOB v2 order builder field. Returns 0x + 64 lowercase hex.
+func normalizeBuilderCode(s string) (string, error) {
+	if s == "" {
+		return "", nil
+	}
+	clean := strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
+	if len(clean) != 64 {
+		return "", fmt.Errorf("builder code must be 32 bytes (64 hex chars), got %d", len(clean))
+	}
+	if _, err := hex.DecodeString(clean); err != nil {
+		return "", fmt.Errorf("builder code is not valid hex: %w", err)
+	}
+	return "0x" + strings.ToLower(clean), nil
+}
+
+// builderHeader returns the X-Builder-Code header for endpoints that accept
+// it, or nil when no builder code is configured (header omitted — safe
+// degradation, the request still succeeds).
+func (c *BridgeClient) builderHeader() map[string]string {
+	if c.builderCode == "" {
+		return nil
+	}
+	return map[string]string{headerBuilderCode: c.builderCode}
+}
+
 type CreateDepositAddressResponse struct {
 	Address struct {
-		EVM string `json:"evm"`
-		SVM string `json:"svm"`
-		BTC string `json:"btc"`
+		EVM  string `json:"evm"`
+		SVM  string `json:"svm"`
+		BTC  string `json:"btc"`
+		Tron string `json:"tron"`
 	} `json:"address"`
 	Note string `json:"note"`
 }
@@ -146,7 +198,7 @@ type ErrResp struct {
 	Message string `json:"message"`
 }
 
-func (c *BridgeClient) doJSON(method, endpoint string, data interface{}, expectedStatus int, result interface{}) error {
+func (c *BridgeClient) doJSON(method, endpoint string, data interface{}, expectedStatus int, result interface{}, extraHeaders map[string]string) error {
 	var bodyReader io.Reader
 	if data != nil {
 		switch v := data.(type) {
@@ -171,6 +223,9 @@ func (c *BridgeClient) doJSON(method, endpoint string, data interface{}, expecte
 	req.Header.Set("Accept", "application/json")
 	if data != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -221,7 +276,7 @@ func (c *BridgeClient) CreateDepositAddress(address common.Address) (*CreateDepo
 	}
 
 	var out CreateDepositAddressResponse
-	if err := c.doJSON(http.MethodPost, "/deposit", reqBody, http.StatusCreated, &out); err != nil {
+	if err := c.doJSON(http.MethodPost, "/deposit", reqBody, http.StatusCreated, &out, c.builderHeader()); err != nil {
 		return nil, fmt.Errorf("bridge /deposit failed: %w", err)
 	}
 	return &out, nil
@@ -230,7 +285,7 @@ func (c *BridgeClient) CreateDepositAddress(address common.Address) (*CreateDepo
 // GetSupportedAssets fetches all supported chains/tokens and minimum deposit thresholds.
 func (c *BridgeClient) GetSupportedAssets() (*SupportedAssetsResponse, error) {
 	var out SupportedAssetsResponse
-	if err := c.doJSON(http.MethodGet, "/supported-assets", nil, http.StatusOK, &out); err != nil {
+	if err := c.doJSON(http.MethodGet, "/supported-assets", nil, http.StatusOK, &out, nil); err != nil {
 		return nil, fmt.Errorf("GET /supported-assets failed: %w", err)
 	}
 	return &out, nil
@@ -246,7 +301,7 @@ func (c *BridgeClient) GetDepositStatus(depositAddress string) (*DepositStatusRe
 	ep := "/status/" + url.PathEscape(depositAddress)
 
 	var out DepositStatusResponse
-	if err := c.doJSON(http.MethodGet, ep, nil, http.StatusOK, &out); err != nil {
+	if err := c.doJSON(http.MethodGet, ep, nil, http.StatusOK, &out, nil); err != nil {
 		return nil, fmt.Errorf("GET %s failed: %w", ep, err)
 	}
 	return &out, nil
@@ -264,7 +319,7 @@ func (c *BridgeClient) GetAQuote(req QuoteRequest) (*QuoteResponse, error) {
 	}
 
 	var out QuoteResponse
-	if err := c.doJSON(http.MethodPost, "/quote", req, http.StatusOK, &out); err != nil {
+	if err := c.doJSON(http.MethodPost, "/quote", req, http.StatusOK, &out, nil); err != nil {
 		return nil, fmt.Errorf("POST /quote failed: %w", err)
 	}
 	return &out, nil
